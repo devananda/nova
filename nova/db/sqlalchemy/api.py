@@ -549,6 +549,7 @@ def compute_node_create(context, values, session=None):
         compute_node_ref = models.ComputeNode()
         session.add(compute_node_ref)
         compute_node_ref.update(values)
+        # NOTE(deva): why no .save() call here?
     return compute_node_ref
 
 
@@ -583,6 +584,8 @@ def compute_node_utilization_update(context, host, free_ram_mb_delta=0,
     duration of the operation. Requires that ComputeNode record exist."""
     session = get_session()
     compute_node = None
+    # NOTE(deva): update lock will be held until transaction is closed
+    #             therefor, I think we should not allow subtransaction here
     with session.begin(subtransactions=True):
         compute_node = session.query(models.ComputeNode).\
                               options(joinedload('service')).\
@@ -618,6 +621,8 @@ def compute_node_utilization_set(context, host, free_ram_mb=None,
     """
     session = get_session()
     compute_node = None
+    # NOTE(deva): update lock will be held until transaction is closed
+    #             therefor, I think we should not allow subtransaction here
     with session.begin(subtransactions=True):
         compute_node = session.query(models.ComputeNode).\
                               options(joinedload('service')).\
@@ -749,6 +754,10 @@ def floating_ip_allocate_address(context, project_id, pool):
                                   first()
         # NOTE(vish): if with_lockmode isn't supported, as in sqlite,
         #             then this has concurrency issues
+        # NOTE(deva): in mysql, with_lockmode will lock all rows touched by
+        #             the query, not just those returned. therefor, we must
+        #             have a matching index for the filter_by params.
+        #             otherwise, we run into concurrency issues there, too.
         if not floating_ip_ref:
             raise exception.NoMoreFloatingIps()
         floating_ip_ref['project_id'] = project_id
@@ -951,9 +960,13 @@ def floating_ip_update(context, address, values):
             floating_ip_ref[key] = value
         floating_ip_ref.save(session=session)
 
+# NOTE(deva): the abstraction of the _dnsdomain_get[_or_create] functions
+#             adds ambiguity to where database locks are being taken
 
 @require_context
 def _dnsdomain_get(context, session, fqdomain):
+    # NOTE(deva): this function must be called in "with session.begin()"
+    #             so the row lock can be released by session.__exit__
     return model_query(context, models.DNSDomain,
                        session=session, read_deleted="no").\
                filter_by(domain=fqdomain).\
@@ -1012,6 +1025,9 @@ def dnsdomain_unregister(context, fqdomain):
 
 @require_context
 def dnsdomain_list(context):
+    # NOTE(deva): why is this query using with_lockmode('update') 
+    #             to lock the whole table?
+    #             And why is it not releasing the lock?
     session = get_session()
     records = model_query(context, models.DNSDomain,
                   session=session, read_deleted="no").\
@@ -1082,6 +1098,9 @@ def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
                                first()
         # NOTE(vish): if with_lockmode isn't supported, as in sqlite,
         #             then this has concurrency issues
+        # NOTE(deva): even in MySQL, this will have concurrency issues because
+        #             it will match and lock all un-assigned rows.
+        #             In effect, this query serializes by locking whole table.
         if not fixed_ip_ref:
             raise exception.NoMoreFixedIps()
 
@@ -1099,6 +1118,7 @@ def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
 
 @require_context
 def fixed_ip_create(context, values):
+    # NOTE(deva): why is this not in a session? save() does not call commit().
     fixed_ip_ref = models.FixedIp()
     fixed_ip_ref.update(values)
     fixed_ip_ref.save()
@@ -1133,6 +1153,10 @@ def fixed_ip_disassociate_all_by_timeout(context, host, time):
     #             host; i.e. the network host or the instance
     #             host matches. Two queries necessary because
     #             join with update doesn't work.
+    # NOTE(deva): if you SELECT then UPDATE the record, you must lock it
+    #             otherwise there is a race condition.
+    #             However, join with update works fine in MySQL!
+    #             Lastly, why is all this not done inside session.begin()?
     host_filter = or_(and_(models.Instance.host == host,
                            models.Network.multi_host == True),
                       models.Network.host == host)
@@ -1269,6 +1293,8 @@ def virtual_interface_create(context, values):
 
     :param values: = dict containing column values
     """
+    # NOTE(deva): why is this not done inside session.begin()?
+    #             save() does not call commit()
     try:
         vif_ref = models.VirtualInterface()
         vif_ref.update(values)
@@ -1352,6 +1378,8 @@ def virtual_interface_delete(context, vif_id):
     :param vif_id: = id of vif to delete
     """
     session = get_session()
+    # NOTE(deva): virtual_interface_get should happen after session.begin()
+    #             and this should allow subtransactions
     vif_ref = virtual_interface_get(context, vif_id, session)
     with session.begin():
         session.delete(vif_ref)
@@ -1364,6 +1392,9 @@ def virtual_interface_delete_by_instance(context, instance_uuid):
 
     :param instance_uuid: = uuid of instance
     """
+    # NOTE(deva): for transactional atomicity, this for loop should be 
+    #             wrapped in "with session.begin"
+    #             and virtual_interface_delete should allow subtransactions
     vif_refs = virtual_interface_get_by_instance(context, instance_uuid)
     for vif_ref in vif_refs:
         virtual_interface_delete(context, vif_ref['id'])
@@ -1404,6 +1435,8 @@ def instance_create(context, values):
     values['system_metadata'] = _metadata_refs(
             values.get('system_metadata'), models.InstanceSystemMetadata)
 
+    # NOTE(deva): creating the record in instances and instance_info_caches 
+    #             should both happen in a single atomic transaction.
     instance_ref = models.Instance()
     if not values.get('uuid'):
         values['uuid'] = str(utils.gen_uuid())
@@ -1820,6 +1853,10 @@ def _instance_update(context, instance_uuid, values, copy_old_instance=False):
     else:
         old_instance_ref = None
 
+    # NOTE(deva): shouldn't all three updates be wrapped into one transaction?
+    #             it looks like instance_metadata_update and 
+    #             instance_system_metadata_update do not commit their changes
+    #             so it should be OK to move "with session.begin" up here
     metadata = values.get('metadata')
     if metadata is not None:
         instance_metadata_update(
@@ -1855,6 +1892,7 @@ def instance_add_security_group(context, instance_uuid, security_group_id):
 def instance_remove_security_group(context, instance_uuid, security_group_id):
     """Disassociate the given security group from the given instance"""
     session = get_session()
+    # NOTE(deva): should have session.begin() here
     instance_ref = instance_get_by_uuid(context, instance_uuid,
                                         session=session)
     session.query(models.SecurityGroupInstanceAssociation).\
@@ -1920,6 +1958,8 @@ def instance_info_cache_update(context, instance_uuid, values,
     :param values: = dict containing column values to update
     :param session: = optional session object
     """
+    # NOTE(deva): this should all happen inside a transaction
+    #             http://paste.openstack.org/show/18731/
     session = session or get_session()
     info_cache = instance_info_cache_get(context, instance_uuid,
                                          session=session)
@@ -1928,6 +1968,8 @@ def instance_info_cache_update(context, instance_uuid, values,
         if info_cache['deleted']:
             return info_cache
 
+        # NOTE(deva): why is there no "session.begin()" here? 
+        #             I don't believe .save() triggers commit
         info_cache.update(values)
         info_cache.save(session=session)
     else:
@@ -2085,6 +2127,11 @@ def network_count_reserved_ips(context, network_id):
 
 @require_admin_context
 def network_create_safe(context, values):
+    # NOTE(deva): This function is not, as the name implies, safe!
+    #             There is a big race condition between two threads
+    #             both passing the SELECT and then both trying to INSERT
+    #             It needs to be re-written, either with a SELECT .. LOCK
+    #             or with good handling of INSERT failures
     if values.get('vlan'):
         if model_query(context, models.Network, read_deleted="no")\
                       .filter_by(vlan=values['vlan'])\
@@ -2361,6 +2408,8 @@ def iscsi_target_count_by_host(context, host):
 
 @require_admin_context
 def iscsi_target_create_safe(context, values):
+    # NOTE(deva): why is this function called "safe" when there are
+    #             no transactions involved?
     iscsi_target_ref = models.IscsiTarget()
 
     for (key, value) in values.iteritems():
@@ -2675,6 +2724,8 @@ def quota_usage_update(context, user_id, project_id, resource, in_use,
         quota_usage_ref.until_refresh = until_refresh
         quota_usage_ref.save(session=session)
 
+    # NOTE(deva): why the unusual handling of session object here?
+    #             Using subtransaction would simplify the code
     if session:
         # Assume caller started a transaction
         do_update(session)
@@ -2772,6 +2823,8 @@ def _get_quota_usages(context, session):
 @require_context
 def quota_reserve(context, resources, quotas, deltas, expire,
                   until_refresh, max_age):
+    # NOTE(deva); complex transaction handling in this function appears
+    #             to be valid, but should be verified with SQL traces
     elevated = context.elevated()
     session = get_session()
     with session.begin():
@@ -2919,6 +2972,8 @@ def _quota_reservations(session, context, reservations):
 
 @require_context
 def reservation_commit(context, reservations):
+    # NOTE(deva): transaction starts & ends inside this function
+    #             check caller's transactional expectations
     session = get_session()
     with session.begin():
         usages = _get_quota_usages(context, session)
@@ -2937,6 +2992,8 @@ def reservation_commit(context, reservations):
 
 @require_context
 def reservation_rollback(context, reservations):
+    # NOTE(deva): transaction starts & ends inside this function
+    #             check caller's transactional expectations
     session = get_session()
     with session.begin():
         usages = _get_quota_usages(context, session)
@@ -3037,6 +3094,8 @@ def reservation_expire(context):
 
 @require_admin_context
 def volume_allocate_iscsi_target(context, volume_id, host):
+    # NOTE(deva): iscsi target allocation is serialized due to lockmode
+    #             will probably cause concurrency problems at scale
     session = get_session()
     with session.begin():
         iscsi_target_ref = model_query(context, models.IscsiTarget,
@@ -3223,6 +3282,9 @@ def volume_get_iscsi_target_num(context, volume_id):
 
 @require_context
 def volume_update(context, volume_id, values):
+    # NOTE(deva): why is transaction not started at top of function?
+    #             trx should enclose volume_get and volume_metadata_update
+    #             This will require change to volume_metadata_update
     session = get_session()
     volume_ref = volume_get(context, volume_id, session=session)
     metadata = values.get('metadata')
@@ -3334,6 +3396,7 @@ def volume_metadata_get(context, volume_id):
 @require_context
 @require_volume_exists
 def volume_metadata_delete(context, volume_id, key):
+    # NOTE(deva): why is this not done inside trx?
     _volume_metadata_get_query(context, volume_id).\
         filter_by(key=key).\
         update({'deleted': True,
@@ -3358,6 +3421,11 @@ def volume_metadata_get_item(context, volume_id, key, session=None):
 @require_volume_exists
 def volume_metadata_update(context, volume_id, metadata, delete):
     session = get_session()
+    # NOTE(deva): function should do all updates inside a trx
+    #             when called from volume/api.py, 
+    #             and should take session as a parameter 
+    #             when called from volume_update(), 
+    #             then do all work in a subtransaction
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -3401,6 +3469,7 @@ def snapshot_create(context, values):
     snapshot_ref.update(values)
 
     session = get_session()
+    # NOTE(deva): transaction unnecessary for just one INSERT
     with session.begin():
         snapshot_ref.save(session=session)
     return snapshot_ref
@@ -4193,6 +4262,7 @@ def instance_metadata_get(context, instance_uuid):
 
 @require_context
 def instance_metadata_delete(context, instance_uuid, key):
+    # NOTE(deva): why is this not done inside trx?
     _instance_metadata_get_query(context, instance_uuid).\
         filter_by(key=key).\
         update({'deleted': True,
@@ -4217,6 +4287,7 @@ def instance_metadata_get_item(context, instance_uuid, key, session=None):
 @require_context
 def instance_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -4271,6 +4342,7 @@ def instance_system_metadata_get(context, instance_uuid):
 
 @require_context
 def instance_system_metadata_delete(context, instance_uuid, key):
+    # NOTE(deva): why is this not done inside trx?
     _instance_system_metadata_get_query(context, instance_uuid).\
         filter_by(key=key).\
         update({'deleted': True,
@@ -4295,6 +4367,7 @@ def _instance_system_metadata_get_item(context, instance_uuid, key,
 @require_context
 def instance_system_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -4458,6 +4531,7 @@ def instance_type_extra_specs_get(context, flavor_id):
 @require_context
 def instance_type_extra_specs_delete(context, flavor_id, key):
     # Don't need synchronize the session since we will not use the query result
+    # NOTE(deva): why is this not done inside trx?
     _instance_type_extra_specs_get_query(
                             context, flavor_id).\
         filter(models.InstanceTypeExtraSpecs.key == key).\
@@ -4485,6 +4559,7 @@ def instance_type_extra_specs_get_item(context, flavor_id, key,
 def instance_type_extra_specs_update_or_create(context, flavor_id,
                                                specs):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx?
     spec_ref = None
     instance_type = instance_type_get_by_flavor_id(context, flavor_id)
     for key, value in specs.iteritems():
@@ -4639,6 +4714,7 @@ def volume_type_extra_specs_get(context, volume_type_id):
 
 @require_context
 def volume_type_extra_specs_delete(context, volume_type_id, key):
+    # NOTE(deva): why is this not done inside trx?
     _volume_type_extra_specs_query(context, volume_type_id).\
         filter_by(key=key).\
         update({'deleted': True,
@@ -4665,6 +4741,10 @@ def volume_type_extra_specs_get_item(context, volume_type_id, key,
 def volume_type_extra_specs_update_or_create(context, volume_type_id,
                                              specs):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx?
+    #             this "try: update; else: insert" logic creates 
+    #             a dangerous race condition and should be replaced with
+    #             INSERT .. ON DUP KEY UPDATE
     spec_ref = None
     for key, value in specs.iteritems():
         try:
@@ -4897,6 +4977,7 @@ def sm_volume_create(context, values):
 
 
 def sm_volume_update(context, volume_id, values):
+    # NOTE(deva): why is this not done inside trx?
     sm_volume = sm_volume_get(context, volume_id)
     sm_volume.update(values)
     sm_volume.save()
@@ -4935,6 +5016,12 @@ def _aggregate_get_query(context, model_class, id_field, id,
 @require_admin_context
 def aggregate_create(context, values, metadata=None):
     session = get_session()
+    # NOTE(deva): this should all be inside a transaction
+    #             as it stands, there is a race condition if two threads
+    #             both pass the select and try to insert the same row
+    #             SELECT .. FOR UPDATE would prevent this
+    #             alternately, a try block around .save() to catch dup key
+    #             and re-run the select
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
                                      models.Aggregate.name,
@@ -5000,6 +5087,7 @@ def aggregate_metadata_get_by_host(context, host, key=None):
 @require_admin_context
 def aggregate_update(context, aggregate_id, values):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx?
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
                                      models.Aggregate.id,
@@ -5023,6 +5111,7 @@ def aggregate_update(context, aggregate_id, values):
 
 @require_admin_context
 def aggregate_delete(context, aggregate_id):
+    # NOTE(deva): why is this not done inside trx?
     query = _aggregate_get_query(context,
                                  models.Aggregate,
                                  models.Aggregate.id,
@@ -5053,6 +5142,7 @@ def aggregate_metadata_get(context, aggregate_id):
 @require_admin_context
 @require_aggregate_exists
 def aggregate_metadata_delete(context, aggregate_id, key):
+    # NOTE(deva): why is this not done inside trx?
     query = _aggregate_get_query(context,
                                  models.AggregateMetadata,
                                  models.AggregateMetadata.aggregate_id,
@@ -5088,6 +5178,9 @@ def aggregate_metadata_get_item(context, aggregate_id, key, session=None):
 @require_aggregate_exists
 def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
     session = get_session()
+    # NOTE(deva): why is this not done inside trx? 
+    #             several updates are done inside for loops here, 
+    #             and save() is called in each iteration
 
     if set_delete:
         original_metadata = aggregate_metadata_get(context, aggregate_id)
@@ -5130,6 +5223,7 @@ def aggregate_host_get_all(context, aggregate_id):
 @require_admin_context
 @require_aggregate_exists
 def aggregate_host_delete(context, aggregate_id, host):
+    # NOTE(deva): why is this not done inside trx?
     query = _aggregate_get_query(context,
                                  models.AggregateHost,
                                  models.AggregateHost.aggregate_id,
@@ -5147,6 +5241,12 @@ def aggregate_host_delete(context, aggregate_id, host):
 @require_aggregate_exists
 def aggregate_host_add(context, aggregate_id, host):
     session = get_session()
+    # NOTE(deva): this should all be inside a transaction
+    #             as it stands, there is a race condition if two threads
+    #             both pass the select and try to insert the same row
+    #             SELECT .. FOR UPDATE would prevent this
+    #             alternately, a try block around .save() to catch dup key
+    #             and re-run the select
     host_ref = _aggregate_get_query(context,
                                     models.AggregateHost,
                                     models.AggregateHost.aggregate_id,
