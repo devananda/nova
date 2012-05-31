@@ -1331,6 +1331,8 @@ class NetworkManager(manager.SchedulerDependentManager):
 
     def lease_fixed_ip(self, context, address):
         """Called by dhcp-bridge when ip is leased."""
+        # NOTE(deva): SELECT followed by UPDATE race condition
+        #             http://paste.openstack.org/show/21654/
         LOG.debug(_('Leased IP |%(address)s|'), locals(), context=context)
         fixed_ip = self.db.fixed_ip_get_by_address(context, address)
 
