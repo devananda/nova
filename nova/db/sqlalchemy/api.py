@@ -549,7 +549,6 @@ def compute_node_create(context, values, session=None):
         compute_node_ref = models.ComputeNode()
         session.add(compute_node_ref)
         compute_node_ref.update(values)
-        # NOTE(deva): why no .save() call here?
     return compute_node_ref
 
 
@@ -983,6 +982,7 @@ def dnsdomain_get(context, fqdomain):
 
 @require_admin_context
 def _dnsdomain_get_or_create(context, session, fqdomain):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     domain_ref = _dnsdomain_get(context, session, fqdomain)
     if not domain_ref:
         dns_ref = models.DNSDomain()
@@ -1025,9 +1025,8 @@ def dnsdomain_unregister(context, fqdomain):
 
 @require_context
 def dnsdomain_list(context):
-    # NOTE(deva): why is this query using with_lockmode('update') 
-    #             to lock the whole table?
-    #             And why is it not releasing the lock?
+    # NOTE(deva): why is this query using with_lockmode('update') to lock 
+    #             the whole table, when nothing is being updated?
     session = get_session()
     records = model_query(context, models.DNSDomain,
                   session=session, read_deleted="no").\
@@ -1118,7 +1117,9 @@ def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
 
 @require_context
 def fixed_ip_create(context, values):
-    # NOTE(deva): why is this not in a session? save() does not call commit().
+    # NOTE(deva): I think there is an assumption that the calling scope
+    #             is inside a transaction, particularly if this function is
+    #             called inside a loop. Check this.
     fixed_ip_ref = models.FixedIp()
     fixed_ip_ref.update(values)
     fixed_ip_ref.save()
@@ -1892,7 +1893,6 @@ def instance_add_security_group(context, instance_uuid, security_group_id):
 def instance_remove_security_group(context, instance_uuid, security_group_id):
     """Disassociate the given security group from the given instance"""
     session = get_session()
-    # NOTE(deva): should have session.begin() here
     instance_ref = instance_get_by_uuid(context, instance_uuid,
                                         session=session)
     session.query(models.SecurityGroupInstanceAssociation).\
@@ -1958,7 +1958,7 @@ def instance_info_cache_update(context, instance_uuid, values,
     :param values: = dict containing column values to update
     :param session: = optional session object
     """
-    # NOTE(deva): this should all happen inside a transaction
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     #             http://paste.openstack.org/show/18731/
     session = session or get_session()
     info_cache = instance_info_cache_get(context, instance_uuid,
@@ -2128,10 +2128,7 @@ def network_count_reserved_ips(context, network_id):
 @require_admin_context
 def network_create_safe(context, values):
     # NOTE(deva): This function is not, as the name implies, safe!
-    #             There is a big race condition between two threads
-    #             both passing the SELECT and then both trying to INSERT
-    #             It needs to be re-written, either with a SELECT .. LOCK
-    #             or with good handling of INSERT failures
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     if values.get('vlan'):
         if model_query(context, models.Network, read_deleted="no")\
                       .filter_by(vlan=values['vlan'])\
@@ -2409,7 +2406,8 @@ def iscsi_target_count_by_host(context, host):
 @require_admin_context
 def iscsi_target_create_safe(context, values):
     # NOTE(deva): why is this function called "safe" when there are
-    #             no transactions involved?
+    #             no transactions involved? The only thing this function does
+    #             is throw away IntegrityError exceptions.
     iscsi_target_ref = models.IscsiTarget()
 
     for (key, value) in values.iteritems():
@@ -2973,7 +2971,8 @@ def _quota_reservations(session, context, reservations):
 @require_context
 def reservation_commit(context, reservations):
     # NOTE(deva): transaction starts & ends inside this function
-    #             check caller's transactional expectations
+    #             but I believe calling functions expect this to
+    #             atomically commit prior work as well, which it does not.
     session = get_session()
     with session.begin():
         usages = _get_quota_usages(context, session)
@@ -2993,7 +2992,8 @@ def reservation_commit(context, reservations):
 @require_context
 def reservation_rollback(context, reservations):
     # NOTE(deva): transaction starts & ends inside this function
-    #             check caller's transactional expectations
+    #             which implicitly commits any previously-opened transaction
+    #             check callering functions to ensure they already rolled back
     session = get_session()
     with session.begin():
         usages = _get_quota_usages(context, session)
@@ -3094,8 +3094,8 @@ def reservation_expire(context):
 
 @require_admin_context
 def volume_allocate_iscsi_target(context, volume_id, host):
-    # NOTE(deva): iscsi target allocation is serialized due to lockmode
-    #             will probably cause concurrency problems at scale
+    # NOTE(deva): iscsi target allocation is serialized at the host level
+    #             due to lockmode. This may cause concurrency problems at scale
     session = get_session()
     with session.begin():
         iscsi_target_ref = model_query(context, models.IscsiTarget,
@@ -3441,6 +3441,7 @@ def volume_metadata_update(context, volume_id, metadata, delete):
 
     # Now update all existing items with new values, or create new meta objects
     for meta_key, meta_value in metadata.iteritems():
+        # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
 
         # update the value whether it exists or not
         item = {"value": meta_value}
@@ -3557,6 +3558,7 @@ def block_device_mapping_update(context, bdm_id, values):
 
 @require_context
 def block_device_mapping_update_or_create(context, values):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
     with session.begin():
         result = _block_device_mapping_get_query(context, session=session).\
@@ -3761,6 +3763,7 @@ def security_group_create(context, values, session=None):
 
 def security_group_ensure_default(context, session=None):
     """Ensure default security group exists for a project_id."""
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     try:
         default_group = security_group_get_by_name(context,
                 context.project_id, 'default',
@@ -4093,6 +4096,7 @@ def instance_type_create(context, values):
     {'extra_specs' : {'k1': 'v1', 'k2': 'v2', ...}}
 
     """
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
     with session.begin():
         try:
@@ -4287,7 +4291,9 @@ def instance_metadata_get_item(context, instance_uuid, key, session=None):
 @require_context
 def instance_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
-    # NOTE(deva): why is this not done inside trx?
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
+    # NOTE(deva): why is this not using a trx to ensure consitency
+    #             when updating many rows in a for loop?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -4367,7 +4373,9 @@ def _instance_system_metadata_get_item(context, instance_uuid, key,
 @require_context
 def instance_system_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
-    # NOTE(deva): why is this not done inside trx?
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
+    # NOTE(deva): why is this not using a trx to ensure consitency
+    #             when updating many rows in a for loop?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -4467,6 +4475,7 @@ def bw_usage_get_by_uuids(context, uuids, start_period):
 @require_context
 def bw_usage_update(context, uuid, mac, start_period, bw_in, bw_out,
                     last_refreshed=None, session=None):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     if not session:
         session = get_session()
 
@@ -4558,11 +4567,12 @@ def instance_type_extra_specs_get_item(context, flavor_id, key,
 @require_context
 def instance_type_extra_specs_update_or_create(context, flavor_id,
                                                specs):
-    session = get_session()
     # NOTE(deva): why is this not done inside trx?
+    session = get_session()
     spec_ref = None
     instance_type = instance_type_get_by_flavor_id(context, flavor_id)
     for key, value in specs.iteritems():
+        # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
         try:
             spec_ref = instance_type_extra_specs_get_item(
                 context, flavor_id, key, session)
@@ -4588,6 +4598,7 @@ def volume_type_create(context, values):
     """
     session = get_session()
     with session.begin():
+        # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
         try:
             volume_type_get_by_name(context, values['name'], session)
             raise exception.VolumeTypeExists(name=values['name'])
@@ -4740,13 +4751,11 @@ def volume_type_extra_specs_get_item(context, volume_type_id, key,
 @require_context
 def volume_type_extra_specs_update_or_create(context, volume_type_id,
                                              specs):
-    session = get_session()
     # NOTE(deva): why is this not done inside trx?
-    #             this "try: update; else: insert" logic creates 
-    #             a dangerous race condition and should be replaced with
-    #             INSERT .. ON DUP KEY UPDATE
+    session = get_session()
     spec_ref = None
     for key, value in specs.iteritems():
+        # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
         try:
             spec_ref = volume_type_extra_specs_get_item(
                 context, volume_type_id, key, session)
@@ -4803,6 +4812,7 @@ def s3_image_create(context, image_uuid):
 
 @require_admin_context
 def sm_backend_conf_create(context, values):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
     with session.begin():
         config_params = values['config_params']
@@ -4893,6 +4903,7 @@ def _sm_flavor_get_query(context, sm_flavor_id, session=None):
 
 @require_admin_context
 def sm_flavor_create(context, values):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
     with session.begin():
         sm_flavor = model_query(context, models.SMFlavors,
@@ -5015,13 +5026,8 @@ def _aggregate_get_query(context, model_class, id_field, id,
 
 @require_admin_context
 def aggregate_create(context, values, metadata=None):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
-    # NOTE(deva): this should all be inside a transaction
-    #             as it stands, there is a race condition if two threads
-    #             both pass the select and try to insert the same row
-    #             SELECT .. FOR UPDATE would prevent this
-    #             alternately, a try block around .save() to catch dup key
-    #             and re-run the select
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
                                      models.Aggregate.name,
@@ -5086,8 +5092,8 @@ def aggregate_metadata_get_by_host(context, host, key=None):
 
 @require_admin_context
 def aggregate_update(context, aggregate_id, values):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
-    # NOTE(deva): why is this not done inside trx?
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
                                      models.Aggregate.id,
@@ -5193,6 +5199,7 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
 
     meta_ref = None
 
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     for meta_key, meta_value in metadata.iteritems():
         item = {"value": meta_value}
         try:
@@ -5240,13 +5247,8 @@ def aggregate_host_delete(context, aggregate_id, host):
 @require_admin_context
 @require_aggregate_exists
 def aggregate_host_add(context, aggregate_id, host):
+    # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
     session = get_session()
-    # NOTE(deva): this should all be inside a transaction
-    #             as it stands, there is a race condition if two threads
-    #             both pass the select and try to insert the same row
-    #             SELECT .. FOR UPDATE would prevent this
-    #             alternately, a try block around .save() to catch dup key
-    #             and re-run the select
     host_ref = _aggregate_get_query(context,
                                     models.AggregateHost,
                                     models.AggregateHost.aggregate_id,
