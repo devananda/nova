@@ -964,8 +964,10 @@ def floating_ip_update(context, address, values):
 
 @require_context
 def _dnsdomain_get(context, session, fqdomain):
-    # NOTE(deva): this function must be called in "with session.begin()"
-    #             so the row lock can be released by session.__exit__
+    # NOTE(deva): the row locks taken by this query will be held by the session
+    #             until that session is released in the caller's scope.
+    #             This may not be clear to the caller, who may hold the lock
+    #             unkowingly and for a long time.
     return model_query(context, models.DNSDomain,
                        session=session, read_deleted="no").\
                filter_by(domain=fqdomain).\
@@ -1025,8 +1027,6 @@ def dnsdomain_unregister(context, fqdomain):
 
 @require_context
 def dnsdomain_list(context):
-    # NOTE(deva): why is this query using with_lockmode('update') to lock 
-    #             the whole table, when nothing is being updated?
     session = get_session()
     records = model_query(context, models.DNSDomain,
                   session=session, read_deleted="no").\
@@ -1117,9 +1117,12 @@ def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
 
 @require_context
 def fixed_ip_create(context, values):
-    # NOTE(deva): I think there is an assumption that the calling scope
-    #             is inside a transaction, particularly if this function is
-    #             called inside a loop. Check this.
+    # NOTE(deva): I think there is an assumption by functions which call this
+    #             function, that they can create many fixed_ip in a loop and
+    #             roll back the lot of them if necessary. However, since no 
+    #             session object is supplied to fixed_ip_ref.save(), I think 
+    #             this is actually committing after each INSERT.
+    #             Needs verification.
     fixed_ip_ref = models.FixedIp()
     fixed_ip_ref.update(values)
     fixed_ip_ref.save()
@@ -1156,7 +1159,7 @@ def fixed_ip_disassociate_all_by_timeout(context, host, time):
     #             join with update doesn't work.
     # NOTE(deva): if you SELECT then UPDATE the record, you must lock it
     #             otherwise there is a race condition.
-    #             However, join with update works fine in MySQL!
+    #             Join with update works fine in MySQL!
     #             Lastly, why is all this not done inside session.begin()?
     host_filter = or_(and_(models.Instance.host == host,
                            models.Network.multi_host == True),
@@ -1294,8 +1297,6 @@ def virtual_interface_create(context, values):
 
     :param values: = dict containing column values
     """
-    # NOTE(deva): why is this not done inside session.begin()?
-    #             save() does not call commit()
     try:
         vif_ref = models.VirtualInterface()
         vif_ref.update(values)
@@ -1968,8 +1969,6 @@ def instance_info_cache_update(context, instance_uuid, values,
         if info_cache['deleted']:
             return info_cache
 
-        # NOTE(deva): why is there no "session.begin()" here? 
-        #             I don't believe .save() triggers commit
         info_cache.update(values)
         info_cache.save(session=session)
     else:
@@ -4292,8 +4291,8 @@ def instance_metadata_get_item(context, instance_uuid, key, session=None):
 def instance_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
     # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
-    # NOTE(deva): why is this not using a trx to ensure consitency
-    #             when updating many rows in a for loop?
+    # NOTE(deva): why is this not using "with session.begin" to ensure
+    #             consitency when updating many rows in a for loop?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
@@ -4374,8 +4373,8 @@ def _instance_system_metadata_get_item(context, instance_uuid, key,
 def instance_system_metadata_update(context, instance_uuid, metadata, delete):
     session = get_session()
     # NOTE(deva): SELECT followed by UPDATE_OR_INSERT race condition
-    # NOTE(deva): why is this not using a trx to ensure consitency
-    #             when updating many rows in a for loop?
+    # NOTE(deva): why is this not using "with session.begin" to ensure
+    #             consitency when updating many rows in a for loop?
 
     # Set existing metadata to deleted if delete argument is True
     if delete:
