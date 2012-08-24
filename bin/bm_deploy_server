@@ -1,0 +1,263 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2012 NTT DOCOMO, INC.
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
+import eventlet
+eventlet.monkey_patch()
+
+import os
+import sys
+import threading
+import time
+
+# If ../nova/__init__.py exists, add ../ to Python search path, so that
+# it will override what happens to be installed in /usr/(local/)lib/python...
+possible_topdir = os.path.normpath(os.path.join(os.path.abspath(sys.argv[0]),
+                                   os.pardir,
+                                   os.pardir))
+if os.path.exists(os.path.join(possible_topdir, 'nova', '__init__.py')):
+    sys.path.insert(0, possible_topdir)
+
+import cgi
+import Queue
+import re
+import socket
+import stat
+from wsgiref import simple_server
+
+from nova import context as nova_context
+from nova import flags
+from nova.openstack.common import cfg
+from nova.openstack.common import log as logging
+from nova import utils
+from nova.virt.baremetal import bmdb
+
+
+flags.parse_args(sys.argv)
+logging.setup("nova")
+
+LOG = logging.getLogger('nova.virt.baremetal.deploy_server')
+
+QUEUE = Queue.Queue()
+
+
+def discovery(portal_address, portal_port):
+    utils.execute('iscsiadm',
+                  '-m', 'discovery',
+                  '-t', 'st',
+                  '-p', '%s:%s' % (portal_address, portal_port),
+                  run_as_root=True,
+                  check_exit_code=[0])
+
+
+def login_iscsi(portal_address, portal_port, target_iqn):
+    utils.execute('iscsiadm',
+                  '-m', 'node',
+                  '-p', '%s:%s' % (portal_address, portal_port),
+                  '-T', target_iqn,
+                  '--login',
+                  run_as_root=True,
+                  check_exit_code=[0])
+    time.sleep(3)
+
+
+def logout_iscsi(portal_address, portal_port, target_iqn):
+    utils.execute('iscsiadm',
+                  '-m', 'node',
+                  '-p', '%s:%s' % (portal_address, portal_port),
+                  '-T', target_iqn,
+                  '--logout',
+                  run_as_root=True,
+                  check_exit_code=[0])
+
+
+def make_partitions(dev, root_mb, swap_mb):
+    commands = ['o,w',
+                'n,p,1,,+%dMB,t,1,82,w' % root_mb,
+                'n,p,2,,+%dMB,t,2,83,w' % swap_mb,
+                'a,1,w',
+                ]
+    for command in commands:
+        command = command.replace(',', '\n')
+        utils.execute('fdisk', dev,
+                      process_input=command,
+                      run_as_root=True,
+                      check_exit_code=[0])
+
+
+def is_block_device(dev):
+    s = os.stat(dev)
+    return stat.S_ISBLK(s.st_mode)
+
+
+def dd(src, dst):
+    utils.execute('dd',
+                  'if=%s' % src,
+                  'of=%s' % dst,
+                  'bs=1M',
+                  run_as_root=True,
+                  check_exit_code=[0])
+
+
+def mkswap(dev):
+    utils.execute('mkswap',
+                  '-L', 'swap1',
+                  dev,
+                  run_as_root=True,
+                  check_exit_code=[0])
+
+
+def block_uuid(dev):
+    out, _ = utils.execute('blkid', '-s', 'UUID', '-o', 'value', dev,
+                           run_as_root=True,
+                           check_exit_code=[0])
+    return out.strip()
+
+
+def switch_pxe_config(path, root_uuid):
+    with open(path) as f:
+        lines = f.readlines()
+    root = 'UUID=%s' % root_uuid
+    rre = re.compile(r'\$\{ROOT\}')
+    dre = re.compile('^default .*$')
+    with open(path, 'w') as f:
+        for line in lines:
+            line = rre.sub(root, line)
+            line = dre.sub('default boot', line)
+            f.write(line)
+
+
+def notify(address, port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect((address, port))
+        s.send('done')
+    finally:
+        s.close()
+
+
+def deploy_work(address, port, iqn, lun, image_path, pxe_config_path, root_mb,
+                swap_mb):
+    dev = "/dev/disk/by-path/ip-%s:%s-iscsi-%s-lun-%s" \
+            % (address, port, iqn, lun)
+
+    root_part = "%s-part1" % dev
+    swap_part = "%s-part2" % dev
+
+    discovery(address, port)
+    login_iscsi(address, port, iqn)
+    try:
+        if not is_block_device(dev):
+            sys.exit(1)
+        make_partitions(dev, root_mb, swap_mb)
+        time.sleep(3)
+        if not is_block_device(root_part):
+            LOG.warn("root device '%s' not found", root_part)
+            return
+        if not is_block_device(swap_part):
+            LOG.warn("swap device '%s' not found", swap_part)
+            return
+        dd(image_path, root_part)
+        mkswap(swap_part)
+        root_uuid = block_uuid(root_part)
+    finally:
+        logout_iscsi(address, port, iqn)
+    switch_pxe_config(pxe_config_path, root_uuid)
+    notify(address, 10000)
+
+
+def get_deployment(context, dep_id):
+    return bmdb.bm_deployment_get(context, dep_id)
+
+
+def delete_deployment(context, dep_id):
+    return bmdb.bm_deployment_destroy(context, dep_id)
+
+
+class Worker(threading.Thread):
+
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.setDaemon(True)
+
+    def run(self):
+        while True:
+            deployment_id, params = QUEUE.get()
+            LOG.info("new work: %s, %s", deployment_id, params)
+            time.sleep(5)
+            try:
+                deploy_work(**params)
+            except Exception:
+                LOG.exception('deploy_work %s failed' % deployment_id)
+            context = nova_context.get_admin_context()
+            delete_deployment(context, deployment_id)
+            LOG.info("deployment %s done", deployment_id)
+
+
+class BareMetalDeploy(object):
+
+    def __init__(self):
+        pass
+
+    def __call__(self, environ, start_response):
+        method = environ['REQUEST_METHOD']
+        if method == 'POST':
+            return self.post(environ, start_response)
+        else:
+            start_response('501 Not Implemented',
+                           [('Content-type', 'text/plain')])
+            return 'Not Implemented'
+
+    def post(self, environ, start_response):
+        LOG.info("post: environ=%s", environ)
+        inpt = environ['wsgi.input']
+        length = int(environ.get('CONTENT_LENGTH', 0))
+
+        x = inpt.read(length)
+        q = dict(cgi.parse_qsl(x))
+        deployment_id = q['i']
+        deployment_key = q['k']
+        address = q['a']
+        port = '3260'
+        iqn = q['n']
+        lun = '1'
+
+        context = nova_context.get_admin_context()
+        d = get_deployment(context, deployment_id)
+        if d['key'] == deployment_key:
+            image_path = d['image_path']
+            pxe_config_path = d['pxe_config_path']
+            root_mb = int(d['root_mb'])
+            swap_mb = int(d['swap_mb'])
+            params = {'address': address,
+                      'port': port,
+                      'iqn': iqn,
+                      'lun': lun,
+                      'image_path': image_path,
+                      'pxe_config_path': pxe_config_path,
+                      'root_mb': root_mb,
+                      'swap_mb': swap_mb,
+                     }
+            QUEUE.put((deployment_id, params))
+        start_response('200 OK', [('Content-type', 'text/plain')])
+        return ''
+
+
+if __name__ == '__main__':
+    Worker().start()
+    app = BareMetalDeploy()
+    srv = simple_server.make_server('', 10000, app)
+    srv.serve_forever()
