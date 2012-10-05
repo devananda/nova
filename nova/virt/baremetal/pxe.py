@@ -417,6 +417,8 @@ class PXE(object):
                   (ari_id, 'ramdisk'),
                   ]
 
+        LOG.debug(_("Activating bootloader with images: %s") % images)
+
         utils.ensure_tree(tftp_root)
         if FLAGS.baremetal_pxe_vlan_per_host:
             tftp_paths = [i[1] for i in images]
