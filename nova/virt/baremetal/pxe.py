@@ -56,10 +56,6 @@ pxe_opts = [
     cfg.StrOpt('baremetal_dnsmasq_lease_dir',
                default='$state_path/baremetal/dnsmasq',
                help='path to directory stores leasefiles of dnsmasq'),
-    cfg.StrOpt('baremetal_deploy_kernel',
-               help='kernel image ID used in deployment phase'),
-    cfg.StrOpt('baremetal_deploy_ramdisk',
-               help='ramdisk image ID used in deployment phase'),
     cfg.BoolOpt('baremetal_pxe_append_iscsi_portal',
                 default=True,
                 help='append "bm_iscsi_porttal=<portal_address>" '
@@ -223,14 +219,6 @@ def _stop_per_host_pxe_server(tftp_root, vlan_id):
 
 class PXE(object):
 
-    def __init__(self):
-        if not FLAGS.baremetal_deploy_kernel:
-            raise exception.NovaException(
-                    'baremetal_deploy_kernel is not defined')
-        if not FLAGS.baremetal_deploy_ramdisk:
-            raise exception.NovaException(
-                    'baremetal_deploy_ramdisk is not defined')
-
     def define_vars(self, instance, network_info, block_device_info):
         var = {}
         var['image_root'] = os.path.join(FLAGS.instances_path,
@@ -321,6 +309,9 @@ class PXE(object):
         injected_files.append(
                 ('/etc/udev/rules.d/70-persistent-net.rules', rules))
 
+        if inst['hostname']:
+            injected_files.append(('/etc/hostname', inst['hostname']))
+
         net = self._generate_network_config(network_info, bootif_name)
 
         if inst['key_data']:
@@ -386,8 +377,8 @@ class PXE(object):
         name = "01-" + node['prov_mac_address'].replace(":", "-").lower()
         return name
 
-    def _put_tftp_images(self, context, instance, tftp_root):
-        def cache_image(image_id, target):
+    def _put_tftp_images(self, context, instance, image_meta, tftp_root):
+        def _cache_image(image_id, target):
             LOG.debug("fetching id=%s target=%s", image_id, target)
             bm_utils.cache_image(context=context,
                                  image_id=image_id,
@@ -395,22 +386,32 @@ class PXE(object):
                                  user_id=instance['user_id'],
                                  project_id=instance['project_id'])
 
-        # (image_id, filename_in_tftp)
-        images = [(FLAGS.baremetal_deploy_kernel, 'deploy_kernel'),
-                  (FLAGS.baremetal_deploy_ramdisk, 'deploy_ramdisk'),
-                  (str(instance['kernel_id']), 'kernel'),
-                  (str(instance['ramdisk_id']), 'ramdisk'),
+        try:
+            aki_id = str(instance['kernel_id'])
+            ari_id = str(instance['ramdisk_id'])
+            deploy_aki_id = str(image_meta['properties']['deploy_kernel_id'])
+            deploy_ari_id = str(image_meta['properties']['deploy_ramdisk_id'])
+        except KeyError as e:
+            raise exception.NovaException(_('Can not activate baremetal '
+                        'bootloader, %s is not defined') % e)
+
+        images = [(deploy_aki_id, 'deploy_kernel'),
+                  (deploy_ari_id, 'deploy_ramdisk'),
+                  (aki_id, 'kernel'),
+                  (ari_id, 'ramdisk'),
                   ]
 
+        LOG.debug(_("Activating bootloader with images: %s") % images)
         fileutils.ensure_tree(tftp_root)
         if not FLAGS.baremetal_pxe_vlan_per_host:
             fileutils.ensure_tree(os.path.join(tftp_root, instance['uuid']))
+
         tftp_paths = []
         for image_id, tftp_path in images:
             if not FLAGS.baremetal_pxe_vlan_per_host:
                 tftp_path = os.path.join(instance['uuid'], tftp_path)
             target = os.path.join(tftp_root, tftp_path)
-            cache_image(image_id, target)
+            _cache_image(image_id, target)
             tftp_paths.append(tftp_path)
         return tftp_paths
 
@@ -434,11 +435,12 @@ class PXE(object):
         deployment = bmdb.bm_deployment_get(context, deployment_id)
         return deployment
 
-    def activate_bootloader(self, var, context, node, instance):
+    def activate_bootloader(self, var, context, node, instance, image_meta):
         tftp_root = var['tftp_root']
         image_path = var['image_path']
 
-        tftp_paths = self._put_tftp_images(context, instance, tftp_root)
+        tftp_paths = self._put_tftp_images(context, instance, image_meta,
+                                            tftp_root)
         LOG.debug("tftp_paths=%s", tftp_paths)
 
         pxe_config_dir = os.path.join(tftp_root, 'pxelinux.cfg')

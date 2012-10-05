@@ -203,7 +203,7 @@ class BareMetalDriver(driver.ComputeDriver):
         node_id = int(nodename)
         node = bmdb.bm_node_get(context, node_id)
         if not node:
-            raise NodeNotFound(nodename=nodename)
+            raise NodeNotFound(nodename=int(nodename))
         if node['instance_uuid']:
             raise NodeInUse(nodename=nodename, instance_uuid=instance['uuid'])
 
@@ -223,8 +223,7 @@ class BareMetalDriver(driver.ComputeDriver):
                                           injected_files=injected_files,
                                           admin_password=admin_password)
         self.baremetal_nodes.activate_bootloader(var, context, node,
-                                                 instance)
-
+                                                 instance, image_meta)
         pm = get_power_manager(node)
         state = pm.activate_node()
 
