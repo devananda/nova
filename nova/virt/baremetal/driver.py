@@ -197,13 +197,15 @@ class BareMetalDriver(driver.ComputeDriver):
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
+        LOG.debug(_("Spawning instance: %s"), instance)
+        LOG.debug(_("Spawning instance with image_meta: %s"), image_meta)
         nodename = instance.get('node')
         if nodename is None:
             raise NodeNotSpecified()
         node_id = int(nodename)
         node = bmdb.bm_node_get(context, node_id)
         if not node:
-            raise NodeNotFound(nodename=nodename)
+            raise NodeNotFound(nodename=int(nodename))
         if node['instance_uuid']:
             raise NodeInUse(nodename=nodename, instance_uuid=instance['uuid'])
 
@@ -223,11 +225,13 @@ class BareMetalDriver(driver.ComputeDriver):
                                           injected_files=injected_files,
                                           admin_password=admin_password)
         self.baremetal_nodes.activate_bootloader(var, context, node,
-                                                 instance)
-
+                                                 instance, image_meta)
         pm = get_power_manager(node)
         state = pm.activate_node()
 
+        # TODO(deva): state should still be BUILDING at this point. 
+        #             set state to ACTIVE only after the run-time kernel 
+        #             has been pulled the first time
         _update_baremetal_state(context, node, instance, state)
 
         self.baremetal_nodes.activate_node(var, context, node, instance)
