@@ -53,10 +53,6 @@ pxe_opts = [
     cfg.StrOpt('baremetal_dnsmasq_lease_dir',
                default='/var/lib/nova/baremetal/dnsmasq',
                help='path to directory stores leasefiles of dnsmasq'),
-    cfg.StrOpt('baremetal_deploy_kernel',
-               help='kernel image ID used in deployment phase'),
-    cfg.StrOpt('baremetal_deploy_ramdisk',
-               help='ramdisk image ID used in deployment phase'),
     cfg.BoolOpt('baremetal_pxe_append_iscsi_portal',
                 default=True,
                 help='append "bm_iscsi_porttal=<portal_address>" '
@@ -237,14 +233,6 @@ def _stop_per_host_pxe_server(tftp_root, vlan_id):
 
 class PXE(object):
 
-    def __init__(self):
-        if not FLAGS.baremetal_deploy_kernel:
-            raise exception.NovaException(
-                    'baremetal_deploy_kernel is not defined')
-        if not FLAGS.baremetal_deploy_ramdisk:
-            raise exception.NovaException(
-                    'baremetal_deploy_ramdisk is not defined')
-
     def define_vars(self, instance, network_info, block_device_info):
         var = {}
         var['image_root'] = os.path.join(FLAGS.instances_path,
@@ -402,10 +390,26 @@ class PXE(object):
         tftp_root = var['tftp_root']
         image_path = var['image_path']
 
-        deploy_aki_id = FLAGS.baremetal_deploy_kernel
-        deploy_ari_id = FLAGS.baremetal_deploy_ramdisk
-        aki_id = str(instance['kernel_id'])
-        ari_id = str(instance['ramdisk_id'])
+        try:
+            aki_id = str(instance['kernel_id'])
+            ari_id = str(instance['ramdisk_id'])
+        except KeyError as e:
+            raise exception.NovaException(_('Can not activate baremetal '
+                        'bootloader, %s is not defined') % e)
+
+        deploy_aki_id = ''
+        deploy_ari_id = ''
+        for m in instance['system_metadata']:
+            if m['key'] == 'image_deploy_kernel_id':
+                deploy_aki_id = str(m['value'])
+            if m['key'] == 'image_deploy_ramdisk_id':
+                deploy_ari_id = str(m['value'])
+        if not deploy_aki_id:
+            raise exception.NovaException(_('Can not activate baremetal '
+                        'bootloader, deploy_kernel_id is not defined'))
+        if not deploy_ari_id:
+            raise exception.NovaException(_('Can not activate baremetal '
+                        'bootloader, deploy_ramdisk_id is not defined'))
 
         images = [(deploy_aki_id, 'deploy_kernel'),
                   (deploy_ari_id, 'deploy_ramdisk'),
