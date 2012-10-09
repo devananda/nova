@@ -218,19 +218,27 @@ class BareMetalDriver(driver.ComputeDriver):
         self._firewall_driver.setup_basic_filtering(instance, network_info)
         self._firewall_driver.prepare_instance_filter(instance, network_info)
 
-        self.baremetal_nodes.create_image(var, context, image_meta, node,
-                                          instance,
-                                          injected_files=injected_files,
-                                          admin_password=admin_password)
-        # TODO(deva): add error handling here.
-        #             probably need to call _update_baremetal_state
-        #             and deactivate_bootloader
-        self.baremetal_nodes.activate_bootloader(var, context, node,
-                                                 instance)
+        try:
+            self.baremetal_nodes.create_image(var, context, image_meta, node,
+                                              instance,
+                                              injected_files=injected_files,
+                                              admin_password=admin_password)
+            self.baremetal_nodes.activate_bootloader(var, context, node,
+                                                     instance)
+            pm = get_power_manager(node)
+            state = pm.activate_node()
+        except Exception as e:
+            self.baremetal_nodes.deactivate_bootloader(var, context, node,
+                                                        instance)
+            self.baremetal_nodes.destroy_images(var, context, node, instance)
+            _update_baremetal_state(context, node, instance,
+                                    baremetal_states.ERROR)
+            raise e
 
-        pm = get_power_manager(node)
-        state = pm.activate_node()
 
+        # TODO(deva): state should still be BUILDING at this point. 
+        #             set state to ACTIVE only after the run-time kernel 
+        #             has been pulled the first time
         _update_baremetal_state(context, node, instance, state)
 
         self.baremetal_nodes.activate_node(var, context, node, instance)
