@@ -417,9 +417,8 @@ class PXE(object):
                   (ari_id, 'ramdisk'),
                   ]
 
-        LOG.debug(_("Activating bootloader with images: %s") % images)
-
         utils.ensure_tree(tftp_root)
+
         if FLAGS.baremetal_pxe_vlan_per_host:
             tftp_paths = [i[1] for i in images]
         else:
@@ -428,10 +427,10 @@ class PXE(object):
             utils.ensure_tree(
                     os.path.join(tftp_root, str(instance['uuid'])))
 
-        LOG.debug("tftp_paths=%s", tftp_paths)
+        LOG.debug(_("Activating bootloader with images: %s") % images)
 
         def _cache_image_b(image_id, target):
-            LOG.debug("fetching id=%s target=%s", image_id, target)
+            LOG.debug("fetching image id=%s target=%s", image_id, target)
             _cache_image_x(context=context,
                            image_id=image_id,
                            target=target,
@@ -468,6 +467,7 @@ class PXE(object):
         if FLAGS.baremetal_pxe_append_iscsi_portal:
             if pxe_ip:
                 iscsi_portal = pxe_ip['server_address']
+
         pxeconf = _build_pxe_config(deployment_id,
                                     deployment_key,
                                     deployment_iscsi_iqn,
@@ -476,6 +476,7 @@ class PXE(object):
                                     aki_path=tftp_paths[2],
                                     ari_path=tftp_paths[3],
                                     iscsi_portal=iscsi_portal)
+        # TODO(deva): should we try/catch here?
         utils.ensure_tree(pxe_config_dir)
         libvirt_utils.write_to_file(pxe_config_path, pxeconf)
 
