@@ -275,6 +275,11 @@ class PXE(object):
             injected_files = []
         injected_files.append(('/etc/udev/rules.d/70-persistent-net.rules',
                                rules))
+        # cjk adding hostname
+        if inst['hostname']:
+            LOG.debug("injecting Hostname")
+            injected_files.append(('/etc/hostname', inst['hostname']))
+            
         bootif_name = "eth%d" % (i - 1)
 
         if inst['key_data']:
