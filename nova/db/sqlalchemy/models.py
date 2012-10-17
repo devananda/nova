@@ -306,7 +306,6 @@ class Instance(BASE, NovaBase):
     node = Column(String(255))
 
 
-
 class InstanceInfoCache(BASE, NovaBase):
     """
     Represents a cache of information about an instance
