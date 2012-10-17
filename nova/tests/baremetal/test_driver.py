@@ -104,14 +104,15 @@ class BaremetalDriverSpawnTestCase(test.TestCase):
         super(BaremetalDriverSpawnTestCase, self).setUp()
         fake_image.stub_out_image_service(self.stubs)
 
+        self.node = _create_baremetal_stuff()
+        self.node_id = self.node['id']
+
         self.context = test_utils.get_test_admin_context()
         self.instance = test_utils.get_test_instance()
         self.instance['uuid'] = '12345'
         self.network_info = test_utils.get_test_network_info()
         self.block_device_info = None
         self.image_meta = test_utils.get_test_image_info(None, self.instance)
-        self.node = _create_baremetal_stuff()
-        self.node_id = self.node['id']
         self.driver = bm_driver.BareMetalDriver()
         self.kwargs = dict(
                 context=self.context,
@@ -127,9 +128,7 @@ class BaremetalDriverSpawnTestCase(test.TestCase):
         fake_image.FakeImageService_reset()
 
     def test_ok(self):
-        self.instance['system_metadata'] = [
-                _system_metadata('node', str(self.node_id)),
-                ]
+        self.instance['node'] = str(self.node_id)
         self.driver.spawn(**self.kwargs)
         node = db.bm_node_get(self.context, self.node_id)
         self.assertEqual(node['instance_uuid'], self.instance['uuid'])
@@ -142,18 +141,14 @@ class BaremetalDriverSpawnTestCase(test.TestCase):
                 **self.kwargs)
 
     def test_node_not_found(self):
-        self.instance['system_metadata'] = [
-                _system_metadata('node', 123456789),
-                ]
+        self.instance['node'] = "123456789"
         self.assertRaises(
                 bm_driver.NodeNotFound,
                 self.driver.spawn,
                 **self.kwargs)
 
     def test_node_in_use(self):
-        self.instance['system_metadata'] = [
-                _system_metadata('node', str(self.node_id)),
-                ]
+        self.instance['node'] = str(self.node_id)
         db.bm_node_update(self.context, self.node_id,
                           {'instance_uuid': 'something'})
         self.assertRaises(
@@ -180,9 +175,7 @@ class BaremetalDriverTestCase(test_virt_drivers._VirtDriverTestCase):
 
     def _get_running_instance(self):
         instance_ref = test_utils.get_test_instance()
-        instance_ref['system_metadata'] = [
-                _system_metadata('node', str(self.node_id)),
-                ]
+        instance_ref['node'] = str(self.node_id)
         network_info = test_utils.get_test_network_info()
         image_info = test_utils.get_test_image_info(None, instance_ref)
         self.connection.spawn(self.ctxt, instance_ref, image_info,
