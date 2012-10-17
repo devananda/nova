@@ -101,15 +101,22 @@ def cast_to_volume_host(context, host, method, **kwargs):
     LOG.debug(_("Casted '%(method)s' to volume '%(host)s'") % locals())
 
 
-def instance_update_db(context, instance_uuid, system_metadata=None):
+def instance_update_db(context, instance_uuid):
     '''Clear the host and set the scheduled_at field of an Instance.
 
     :returns: An Instance with the updated fields set properly.
     '''
     now = timeutils.utcnow()
     values = {'host': None, 'scheduled_at': now}
-    if system_metadata is not None:
-        values['system_metadata'] = system_metadata
+    return db.instance_update(context, instance_uuid, values)
+
+
+def db_instance_node_set(context, instance_uuid, node):
+    '''Set the node field of an Instance.
+
+    :returns: An Instance with the updated fields set properly.
+    '''
+    values = {'node': node}
     return db.instance_update(context, instance_uuid, values)
 
 

@@ -244,12 +244,6 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         self._resource_tracker_dict = {}
 
-    def _get_nodename(self, instance, context=None):
-        if not context:
-            context = nova.context.get_admin_context()
-        smd = self.db.instance_system_metadata_get(context, instance['uuid'])
-        return smd.get('node')
-
     def _get_resource_tracker(self, nodename=None):
         rt = self._resource_tracker_dict.get(nodename)
         if not rt:
@@ -268,8 +262,7 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         (old_ref, instance_ref) = self.db.instance_update_and_get_original(
                 context, instance_uuid, kwargs)
-        nodename = self._get_nodename(instance_ref, context=context)
-        rt = self._get_resource_tracker(nodename)
+        rt = self._get_resource_tracker(instance_ref.get('node'))
         rt.update_usage(context, instance_ref)
         notifications.send_update(context, old_ref, instance_ref)
 
@@ -504,15 +497,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                     extra_usage_info=extra_usage_info)
             network_info = None
 
-            nodename = self._get_nodename(instance, context=context)
-            if nodename is None:
-                nodename = self.driver.get_nodename_for_new_instance(context,
-                                                                     instance)
-                self.db.instance_system_metadata_update(
-                        context, instance['uuid'],
-                        {'node': nodename},
-                        delete=False)
-            rt = self._get_resource_tracker(nodename)
+            rt = self._get_resource_tracker(instance.get('node'))
 
             try:
                 limits = filter_properties.get('limits', {})

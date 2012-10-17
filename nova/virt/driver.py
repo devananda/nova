@@ -701,18 +701,6 @@ class ComputeDriver(object):
         """
         raise NotImplementedError()
 
-    def get_nodename_for_new_instance(self, context, instance):
-        """Returns a nodename for specified instance.
-
-        This method is for multi compute-nodes support. If a driver supports
-        multi compute-nodes, this method returns a node suitable to host the
-        instance. Otherwise, this method should return None.
-
-        This method is called as a fallback in case that scheduler do not
-        specify nodename.
-        """
-        return None
-
     def get_resource_tracker_class(self):
         """
         Returns the name of the custom resource tracker that should be used

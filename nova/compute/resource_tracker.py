@@ -384,9 +384,7 @@ class ResourceTracker(object):
             # Collect instances belong to the node
             node_instances = []
             for instance in instances:
-                smd = db.instance_system_metadata_get(context,
-                                                      instance['uuid'])
-                if smd.get('node') == self.nodename:
+                if instance.get('node') == self.nodename:
                     node_instances.append(instance)
             instances = node_instances
 
