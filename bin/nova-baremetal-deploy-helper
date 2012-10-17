@@ -210,6 +210,7 @@ def delete_deployment(context, dep_id):
 
 
 class Worker(threading.Thread):
+    """Handle requests in queue"""
 
     def __init__(self):
         threading.Thread.__init__(self)
@@ -230,6 +231,7 @@ class Worker(threading.Thread):
 
 
 class BareMetalDeploy(object):
+    """WSGI server for bare-metal deployment"""
 
     def __init__(self):
         pass

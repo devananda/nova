@@ -201,9 +201,9 @@ class BareMetalInterfaceCommands(object):
     @args('--mac_address', dest='mac_address', metavar='<mac_address>',
             help='MAC address in the form of xx:xx:xx:xx:xx:xx')
     @args('--datapath_id', dest='datapath_id', metavar='<datapath_id>',
-            help='OpenFlow datapath ID')
+            help='OpenFlow datapath ID (put 0 if not use OpenFlow)')
     @args('--port_no', dest='port_no', metavar='<port_no>',
-            help='OpenFlow port number')
+            help='OpenFlow port number (put 0 if not use OpenFlow)')
     def create(self, node_id, mac_address, datapath_id, port_no):
         """Creates bare-metal nodes' NICs"""
         datapath_id = datapath_id.lower()
@@ -229,14 +229,14 @@ class BareMetalInterfaceCommands(object):
         print id
 
     @args('--id', dest='if_id', metavar='<id>',
-            help='ID of interface')
+            help='ID of an interface')
     def delete(self, if_id):
         """Deletes bare-metal nodes' NICs"""
         ctx = context.get_admin_context()
         bmdb.bm_interface_destroy(ctx, if_id)
 
     @args('--node_id', dest='node_id', metavar='<node_id>',
-            help='ID of bare-metal node')
+            help='ID of a bare-metal node')
     def list(self, node_id=None):
         """Show a list of all NICs. Filter by node ID"""
         fmt = "%-8s  %-16s  %-18s  %-16s  %-4s"
