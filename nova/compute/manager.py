@@ -260,11 +260,8 @@ class ComputeManager(manager.SchedulerDependentManager):
             self._resource_tracker_dict[nodename] = rt
         return rt
 
-    def _set_default_resource_tracker(self, rt):
-        self._resource_tracker_dict[None] = rt
-
-    resource_tracker = property(_get_resource_tracker,
-                                _set_default_resource_tracker)
+    def _set_resource_tracker(self, rt, nodename=None):
+        self._resource_tracker_dict[nodename] = rt
 
     def _instance_update(self, context, instance_uuid, **kwargs):
         """Update an instance in the database using kwargs as value."""
