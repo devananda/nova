@@ -808,16 +808,15 @@ class LibvirtDriver(driver.ComputeDriver):
             arch = base['properties']['architecture']
             metadata['properties']['architecture'] = arch
 
-        source_format = base.get('disk_format') or 'raw'
-        if source_format == 'ami':
-            # NOTE(vish): assume amis are raw
-            source_format = 'raw'
+        disk_path = libvirt_utils.find_disk(virt_dom)
+        source_format = libvirt_utils.get_disk_type(disk_path)
+
         image_format = FLAGS.snapshot_image_format or source_format
-        use_qcow2 = ((FLAGS.libvirt_images_type == 'default' and
-                FLAGS.use_cow_images) or
-                FLAGS.libvirt_images_type == 'qcow2')
-        if use_qcow2:
-            source_format = 'qcow2'
+
+        # NOTE(bfilippov): save lvm as raw
+        if image_format == 'lvm':
+            image_format = 'raw'
+
         # NOTE(vish): glance forces ami disk format to be ami
         if base.get('disk_format') == 'ami':
             metadata['disk_format'] = 'ami'
@@ -826,9 +825,6 @@ class LibvirtDriver(driver.ComputeDriver):
 
         metadata['container_format'] = base.get('container_format', 'bare')
 
-        # Find the disk
-        disk_path = libvirt_utils.find_disk(virt_dom)
-
         snapshot_name = uuid.uuid4().hex
 
         (state, _max_mem, _mem, _cpus, _t) = virt_dom.info()
@@ -836,8 +832,12 @@ class LibvirtDriver(driver.ComputeDriver):
 
         if state == power_state.RUNNING:
             virt_dom.managedSave(0)
+
         # Make the snapshot
-        libvirt_utils.create_snapshot(disk_path, snapshot_name)
+        snapshot = self.image_backend.snapshot(disk_path, snapshot_name,
+                                               image_type=source_format)
+
+        snapshot.create()
 
         # Export the snapshot to a raw image
         snapshot_directory = FLAGS.libvirt_snapshots_directory
@@ -845,11 +845,9 @@ class LibvirtDriver(driver.ComputeDriver):
         with utils.tempdir(dir=snapshot_directory) as tmpdir:
             try:
                 out_path = os.path.join(tmpdir, snapshot_name)
-                libvirt_utils.extract_snapshot(disk_path, source_format,
-                                               snapshot_name, out_path,
-                                               image_format)
+                snapshot.extract(out_path, image_format)
             finally:
-                libvirt_utils.delete_snapshot(disk_path, snapshot_name)
+                snapshot.delete()
                 if state == power_state.RUNNING:
                     self._create_domain(domain=virt_dom)
 

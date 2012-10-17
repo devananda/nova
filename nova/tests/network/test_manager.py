@@ -133,8 +133,8 @@ class FlatNetworkTestCase(test.TestCase):
         self.tempdir = tempfile.mkdtemp()
         self.flags(logdir=self.tempdir)
         self.network = network_manager.FlatManager(host=HOST)
-        temp = importutils.import_object('nova.network.minidns.MiniDNS')
-        self.network.instance_dns_manager = temp
+        self.network.instance_dns_manager = importutils.import_object(
+                'nova.network.minidns.MiniDNS')
         self.network.instance_dns_domain = ''
         self.network.db = db
         self.context = context.RequestContext('testuser', 'testproject',
@@ -826,6 +826,14 @@ class VlanNetworkTestCase(test.TestCase):
         def fake7(*args, **kwargs):
             self.local = True
 
+        def fake8(*args, **kwargs):
+            return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
+                    'fixed_ip_id': 1,
+                    'auto_assigned': True,
+                    'project_id': ctxt.project_id}
+
         self.stubs.Set(self.network, '_floating_ip_owned_by_project', fake1)
 
         # raises because floating_ip is not associated to a fixed_ip
@@ -852,6 +860,13 @@ class VlanNetworkTestCase(test.TestCase):
         self.stubs.Set(self.network, '_disassociate_floating_ip', fake7)
         self.network.disassociate_floating_ip(ctxt, mox.IgnoreArg())
         self.assertTrue(self.local)
+
+        # raises because auto_assigned floating IP cannot be disassociated
+        self.stubs.Set(self.network.db, 'floating_ip_get_by_address', fake8)
+        self.assertRaises(exception.CannotDisassociateAutoAssignedFloatingIP,
+                          self.network.disassociate_floating_ip,
+                          ctxt,
+                          mox.IgnoreArg())
 
     def test_add_fixed_ip_instance_without_vpn_requested_networks(self):
         self.mox.StubOutWithMock(db, 'network_get')
@@ -1549,8 +1564,8 @@ class FloatingIPTestCase(test.TestCase):
         self.tempdir = tempfile.mkdtemp()
         self.flags(logdir=self.tempdir)
         self.network = TestFloatingIPManager()
-        temp = importutils.import_object('nova.network.minidns.MiniDNS')
-        self.network.floating_dns_manager = temp
+        self.network.floating_dns_manager = importutils.import_object(
+                'nova.network.minidns.MiniDNS')
         self.network.db = db
         self.project_id = 'testproject'
         self.context = context.RequestContext('testuser', self.project_id,
@@ -1787,10 +1802,10 @@ class InstanceDNSTestCase(test.TestCase):
         self.tempdir = tempfile.mkdtemp()
         self.flags(logdir=self.tempdir)
         self.network = TestFloatingIPManager()
-        temp = importutils.import_object('nova.network.minidns.MiniDNS')
-        self.network.instance_dns_manager = temp
-        temp = importutils.import_object('nova.network.dns_driver.DNSDriver')
-        self.network.floating_dns_manager = temp
+        self.network.instance_dns_manager = importutils.import_object(
+                'nova.network.minidns.MiniDNS')
+        self.network.floating_dns_manager = importutils.import_object(
+                'nova.network.dns_driver.DNSDriver')
         self.network.db = db
         self.project_id = 'testproject'
         self.context = context.RequestContext('testuser', self.project_id,

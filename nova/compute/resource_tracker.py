@@ -23,11 +23,11 @@ from nova.compute import vm_states
 from nova import db
 from nova import exception
 from nova import flags
+from nova import notifications
 from nova.openstack.common import cfg
 from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
-from nova.openstack.common import timeutils
 from nova import utils
 
 resource_tracker_opts = [
@@ -35,8 +35,6 @@ resource_tracker_opts = [
                help='Amount of disk in MB to reserve for the host'),
     cfg.IntOpt('reserved_host_memory_mb', default=512,
                help='Amount of memory in MB to reserve for the host'),
-    cfg.IntOpt('claim_timeout_seconds', default=600,
-               help='How long, in seconds, before a resource claim times out'),
     cfg.StrOpt('compute_stats_class',
                default='nova.compute.stats.Stats',
                help='Class that will manage stats for the local compute host')
@@ -51,22 +49,17 @@ COMPUTE_RESOURCE_SEMAPHORE = "compute_resources"
 
 class Claim(object):
     """A declaration that a compute host operation will require free resources.
+    Claims serve as marker objects that resources are being held until the
+    update_available_resource audit process runs to do a full reconciliation
+    of resource usage.
 
     This information will be used to help keep the local compute hosts's
     ComputeNode model in sync to aid the scheduler in making efficient / more
     correct decisions with respect to host selection.
     """
 
-    def __init__(self, instance, timeout):
+    def __init__(self, instance):
         self.instance = jsonutils.to_primitive(instance)
-        self.timeout = timeout
-        self.expire_ts = timeutils.utcnow_ts() + timeout
-
-    def is_expired(self):
-        """Determine if this adjustment is old enough that we can assume it's
-        no longer needed.
-        """
-        return timeutils.utcnow_ts() > self.expire_ts
 
     @property
     def claim_id(self):
@@ -130,8 +123,7 @@ class ResourceTracker(object):
         return ResourceContextManager(context, claim, self)
 
     @utils.synchronized(COMPUTE_RESOURCE_SEMAPHORE)
-    def begin_resource_claim(self, context, instance_ref, limits=None,
-                             timeout=None):
+    def begin_resource_claim(self, context, instance_ref, limits=None):
         """Indicate that some resources are needed for an upcoming compute
         instance build operation.
 
@@ -142,24 +134,26 @@ class ResourceTracker(object):
         :param instance_ref: instance to reserve resources for
         :param limits: Dict of oversubscription limits for memory, disk,
                        and CPUs.
-        :param timeout: How long, in seconds, the operation that requires
-                        these resources should take to actually allocate what
-                        it needs from the hypervisor.  If the timeout is
-                        exceeded, the new resource claim will assume caller
-                        before releasing the resources.
         :returns: An integer 'claim ticket'.  This should be turned into
                   finalize  a resource claim or free resources after the
                   compute operation is finished. Returns None if the claim
                   failed.
         """
         if self.disabled:
+            # compute_driver doesn't support resource tracking, just
+            # set the 'host' field and continue the build:
+            instance_ref = self._set_instance_host(context,
+                                                   instance_ref['uuid'])
             return
+
+        # sanity check:
+        if instance_ref['host']:
+            LOG.warning(_("Host field should be not be set on the instance "
+                          "until resources have been claimed."),
+                          instance=instance_ref)
 
         if not limits:
             limits = {}
-
-        if not timeout:
-            timeout = FLAGS.claim_timeout_seconds
 
         # If an individual limit is None, the resource will be considered
         # unlimited:
@@ -185,9 +179,11 @@ class ResourceTracker(object):
         if not self._can_claim_cpu(vcpus, vcpu_limit):
             return
 
+        instance_ref = self._set_instance_host(context, instance_ref['uuid'])
+
         # keep track of this claim until we know whether the compute operation
         # was successful/completed:
-        claim = Claim(instance_ref, timeout)
+        claim = Claim(instance_ref)
         self.claims[claim.claim_id] = claim
 
         # Mark resources in-use and update stats
@@ -196,6 +192,17 @@ class ResourceTracker(object):
         # persist changes to the compute node:
         self._update(context, self.compute_node)
         return claim
+
+    def _set_instance_host(self, context, instance_uuid):
+        """Tag the instance as belonging to this host.  This should be done
+        while the COMPUTE_RESOURCES_SEMPAHORE is being held so the resource
+        claim will not be lost if the audit process starts.
+        """
+        values = {'host': self.host, 'launched_on': self.host}
+        (old_ref, instance_ref) = db.instance_update_and_get_original(context,
+                instance_uuid, values)
+        notifications.send_update(context, old_ref, instance_ref)
+        return instance_ref
 
     def _can_claim_memory(self, memory_mb, memory_mb_limit):
         """Test if memory needed for a claim can be safely allocated"""
@@ -293,10 +300,6 @@ class ResourceTracker(object):
         resources identified by 'claim' has now completed and the resources
         have been allocated at the virt layer.
 
-        Calling this keeps the available resource data more accurate and
-        timely than letting the claim timeout elapse and waiting for
-        update_available_resource to reflect the changed usage data.
-
         :param claim: A claim indicating a set of resources that were
                       previously claimed.
         """
@@ -304,10 +307,7 @@ class ResourceTracker(object):
             return
 
         if self.claims.pop(claim.claim_id, None):
-            LOG.info(_("Finishing claim: %s") % claim)
-        else:
-            LOG.info(_("Can't find claim %s.  It may have been 'finished' "
-                       "twice, or it has already timed out."), claim.claim_id)
+            LOG.debug(_("Finishing claim: %s") % claim)
 
     @utils.synchronized(COMPUTE_RESOURCE_SEMAPHORE)
     def abort_resource_claim(self, context, claim):
@@ -321,20 +321,13 @@ class ResourceTracker(object):
         if self.disabled:
             return
 
-        # un-claim the resources:
         if self.claims.pop(claim.claim_id, None):
-            LOG.info(_("Aborting claim: %s") % claim)
+            LOG.debug(_("Aborting claim: %s") % claim)
             # flag the instance as deleted to revert the resource usage
             # and associated stats:
             claim.instance['vm_state'] = vm_states.DELETED
             self._update_usage_from_instance(self.compute_node, claim.instance)
             self._update(context, self.compute_node)
-
-        else:
-            # can't find the claim.  this may mean the claim already timed
-            # out or it was already explicitly finished/aborted.
-            LOG.audit(_("Claim %s not found.  It either timed out or was "
-                        "already explicitly finished/aborted"), claim.claim_id)
 
     @utils.synchronized(COMPUTE_RESOURCE_SEMAPHORE)
     def update_usage(self, context, instance):
@@ -383,7 +376,7 @@ class ResourceTracker(object):
 
         self._report_hypervisor_resource_view(resources)
 
-        self._purge_expired_claims()
+        self._purge_claims()
 
         # Grab all instances assigned to this host:
         instances = db.instance_get_all_by_host(context, self.host)
@@ -433,16 +426,11 @@ class ResourceTracker(object):
             self._update(context, resources, prune_stats=True)
             LOG.info(_('Compute_service record updated for %s ') % self.host)
 
-    def _purge_expired_claims(self):
-        """Purge expired resource claims"""
-        for claim_id in self.claims.keys():
-            c = self.claims[claim_id]
-            if c.is_expired():
-                # if this claim is expired, just expunge it.
-                # it is assumed that the instance will eventually get built
-                # successfully.
-                LOG.audit(_("Expiring resource claim %s"), claim_id)
-                self.claims.pop(claim_id)
+    def _purge_claims(self):
+        """Purge claims.  They are no longer needed once the audit process
+        reconciles usage values from the database.
+        """
+        self.claims.clear()
 
     def _create(self, context, values):
         """Create the compute node in the DB"""

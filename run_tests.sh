@@ -88,7 +88,7 @@ function run_tests {
   # Cleanup *pyc
   ${wrapper} find . -type f -name "*.pyc" -delete
   # Just run the test suites in current environment
-  ${wrapper} $NOSETESTS
+  ${wrapper} $NOSETESTS | tee nosetests.log
   # If we get some short import error right away, print the error log directly
   RESULT=$?
   if [ "$RESULT" -ne "0" ];
@@ -97,6 +97,17 @@ function run_tests {
     if [ "$ERRSIZE" -lt "40" ];
     then
         cat run_tests.log
+    fi
+  else
+    tests_run=$(awk '/^Ran/ {print $2}' nosetests.log)
+    if [ "$tests_run" -eq 0 ];
+    then
+        echo "ERROR: Zero tests ran, something is wrong!"
+        echo "This is usually caused by a parse error in some python"
+        echo "file or a failure to set up the environment (i.e. during"
+        echo "temporary database preparation). Running nosetests directly"
+        echo "may offer more clues."
+        return 1
     fi
   fi
   return $RESULT
@@ -117,7 +128,7 @@ function run_pep8 {
   srcfiles+=" setup.py"
 
   # Until all these issues get fixed, ignore.
-  ignore='--ignore=N4'
+  ignore='--ignore=N4,E12,E711,E712,E721,E502'
 
   ${wrapper} python tools/hacking.py ${ignore} ${srcfiles}
 
@@ -125,7 +136,7 @@ function run_pep8 {
   #             checks are too strict.
   pep8onlyfiles=`find plugins -type f -name "*.py"`
   pep8onlyfiles+=" `find plugins/xenserver/xenapi/etc/xapi.d/plugins/ -type f -perm +111`"
-  ${wrapper} pep8 ${pep8onlyfiles}
+  ${wrapper} pep8 ${ignore} ${pep8onlyfiles}
 }
 
 

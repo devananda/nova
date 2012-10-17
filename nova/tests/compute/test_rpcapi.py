@@ -216,8 +216,13 @@ class ComputeRpcAPITestCase(test.TestCase):
                 reservations=list('fake_res'))
 
     def test_reboot_instance(self):
+        self.maxDiff = None
         self._test_compute_api('reboot_instance', 'cast',
-                instance=self.fake_instance, reboot_type='type')
+                instance=self.fake_instance,
+                block_device_info={},
+                network_info={},
+                reboot_type='type',
+                version='2.5')
 
     def test_rebuild_instance(self):
         self._test_compute_api('rebuild_instance', 'cast',
@@ -228,7 +233,8 @@ class ComputeRpcAPITestCase(test.TestCase):
 
     def test_reserve_block_device_name(self):
         self._test_compute_api('reserve_block_device_name', 'call',
-                instance=self.fake_instance, device='device')
+                instance=self.fake_instance, device='device', volume_id='id',
+                version='2.3')
 
     def refresh_provider_fw_rules(self):
         self._test_compute_api('refresh_provider_fw_rules', 'cast',
@@ -324,7 +330,8 @@ class ComputeRpcAPITestCase(test.TestCase):
 
     def test_terminate_instance(self):
         self._test_compute_api('terminate_instance', 'cast',
-                instance=self.fake_instance)
+                instance=self.fake_instance, bdms=[],
+                version='2.4')
 
     def test_unpause_instance(self):
         self._test_compute_api('unpause_instance', 'cast',

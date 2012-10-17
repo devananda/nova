@@ -210,7 +210,7 @@ def _get_image_meta(context, image_ref):
 class ComputeManager(manager.SchedulerDependentManager):
     """Manages the running instances from creation to destruction."""
 
-    RPC_API_VERSION = '2.2'
+    RPC_API_VERSION = '2.5'
 
     def __init__(self, compute_driver=None, *args, **kwargs):
         """Load configuration options and connect to the hypervisor."""
@@ -505,8 +505,8 @@ class ComputeManager(manager.SchedulerDependentManager):
             self._notify_about_instance_usage(
                     context, instance, "create.start",
                     extra_usage_info=extra_usage_info)
-            network_info = self._allocate_network(context, instance,
-                                                  requested_networks)
+            network_info = None
+
             nodename = self._get_nodename(instance, context=context)
             if nodename is None:
                 nodename = self.driver.get_nodename_for_new_instance(context,
@@ -516,14 +516,13 @@ class ComputeManager(manager.SchedulerDependentManager):
                         {'node': nodename},
                         delete=False)
             rt = self._get_resource_tracker(nodename)
+
             try:
                 limits = filter_properties.get('limits', {})
                 with rt.resource_claim(context, instance, limits):
-                    # Resources are available to build this instance here,
-                    # mark it as belonging to this host:
-                    self._instance_update(context, instance['uuid'],
-                            host=self.host, launched_on=self.host)
 
+                    network_info = self._allocate_network(context, instance,
+                            requested_networks)
                     block_device_info = self._prep_block_device(context,
                             instance)
                     instance = self._spawn(context, instance, image_meta,
@@ -568,7 +567,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         try:
             self._deallocate_network(context, instance)
         except Exception:
-            # do not attempt retry if network de-allocation occurs:
+            # do not attempt retry if network de-allocation failed:
             _log_original_error()
             raise
 
@@ -804,10 +803,15 @@ class ComputeManager(manager.SchedulerDependentManager):
         LOG.debug(_('Deallocating network for instance'), instance=instance)
         self.network_api.deallocate_for_instance(context, instance)
 
-    def _get_instance_volume_bdms(self, context, instance_uuid):
-        bdms = self.db.block_device_mapping_get_all_by_instance(context,
-                                                                instance_uuid)
+    def _get_volume_bdms(self, bdms):
+        """Return only bdms that have a volume_id"""
         return [bdm for bdm in bdms if bdm['volume_id']]
+
+    # NOTE(danms): Legacy interface for digging up volumes in the database
+    def _get_instance_volume_bdms(self, context, instance_uuid):
+        return self._get_volume_bdms(
+            self.db.block_device_mapping_get_all_by_instance(context,
+                                                             instance_uuid))
 
     def _get_instance_volume_bdm(self, context, instance_uuid, volume_id):
         bdms = self._get_instance_volume_bdms(context, instance_uuid)
@@ -818,10 +822,15 @@ class ComputeManager(manager.SchedulerDependentManager):
             if str(bdm['volume_id']) == str(volume_id):
                 return bdm
 
+    # NOTE(danms): This is a transitional interface until all the callers
+    # can provide their own bdms
     def _get_instance_volume_block_device_info(self, context, instance_uuid,
                                                bdms=None):
         if bdms is None:
             bdms = self._get_instance_volume_bdms(context, instance_uuid)
+        return self._get_volume_block_device_info(bdms)
+
+    def _get_volume_block_device_info(self, bdms):
         block_device_mapping = []
         for bdm in bdms:
             try:
@@ -860,7 +869,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                     admin_password, is_first_time, instance)
         do_run_instance()
 
-    def _shutdown_instance(self, context, instance):
+    def _shutdown_instance(self, context, instance, bdms):
         """Shutdown an instance on this host."""
         context = context.elevated()
         LOG.audit(_('%(action_str)s instance') % {'action_str': 'Terminating'},
@@ -878,12 +887,12 @@ class ComputeManager(manager.SchedulerDependentManager):
         self._deallocate_network(context, instance)
 
         # NOTE(vish) get bdms before destroying the instance
-        bdms = self._get_instance_volume_bdms(context, instance['uuid'])
+        vol_bdms = self._get_volume_bdms(bdms)
         block_device_info = self._get_instance_volume_block_device_info(
             context, instance['uuid'], bdms=bdms)
         self.driver.destroy(instance, self._legacy_nw_info(network_info),
                             block_device_info)
-        for bdm in bdms:
+        for bdm in vol_bdms:
             try:
                 # NOTE(vish): actual driver detach done in driver.destroy, so
                 #             just tell nova-volume that we are done with it.
@@ -902,9 +911,7 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         self._notify_about_instance_usage(context, instance, "shutdown.end")
 
-    def _cleanup_volumes(self, context, instance_uuid):
-        bdms = self.db.block_device_mapping_get_all_by_instance(context,
-                                                                instance_uuid)
+    def _cleanup_volumes(self, context, instance_uuid, bdms):
         for bdm in bdms:
             LOG.debug(_("terminating bdm %s") % bdm,
                       instance_uuid=instance_uuid)
@@ -913,12 +920,12 @@ class ComputeManager(manager.SchedulerDependentManager):
                 self.volume_api.delete(context, volume)
             # NOTE(vish): bdms will be deleted on instance destroy
 
-    def _delete_instance(self, context, instance):
+    def _delete_instance(self, context, instance, bdms):
         """Delete an instance on this host."""
         instance_uuid = instance['uuid']
         self.db.instance_info_cache_delete(context, instance_uuid)
         self._notify_about_instance_usage(context, instance, "delete.start")
-        self._shutdown_instance(context, instance)
+        self._shutdown_instance(context, instance, bdms)
         # NOTE(vish): We have already deleted the instance, so we have
         #             to ignore problems cleaning up the volumes. It would
         #             be nice to let the user know somehow that the volume
@@ -928,7 +935,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         #             the first time and to only ignore the failure if the
         #             instance is already in ERROR.
         try:
-            self._cleanup_volumes(context, instance_uuid)
+            self._cleanup_volumes(context, instance_uuid, bdms)
         except Exception as exc:
             LOG.warn(_("Ignoring volume cleanup failure due to %s") % exc,
                      instance_uuid=instance_uuid)
@@ -947,7 +954,7 @@ class ComputeManager(manager.SchedulerDependentManager):
 
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     @wrap_instance_fault
-    def terminate_instance(self, context, instance):
+    def terminate_instance(self, context, instance, bdms=None):
         """Terminate an instance on this host.  """
         # Note(eglynn): we do not decorate this action with reverts_task_state
         # because a failure during termination should leave the task state as
@@ -956,11 +963,14 @@ class ComputeManager(manager.SchedulerDependentManager):
         # in_use count (see bug 1046236).
 
         elevated = context.elevated()
+        # NOTE(danms): remove this compatibility in the future
+        if not bdms:
+            bdms = self._get_instance_volume_bdms(context, instance["uuid"])
 
         @utils.synchronized(instance['uuid'])
-        def do_terminate_instance(instance):
+        def do_terminate_instance(instance, bdms):
             try:
-                self._delete_instance(context, instance)
+                self._delete_instance(context, instance, bdms)
             except exception.InstanceTerminationFailure as error:
                 msg = _('%s. Setting instance vm_state to ERROR')
                 LOG.error(msg % error, instance=instance)
@@ -968,7 +978,7 @@ class ComputeManager(manager.SchedulerDependentManager):
             except exception.InstanceNotFound as e:
                 LOG.warn(e, instance=instance)
 
-        do_terminate_instance(instance)
+        do_terminate_instance(instance, bdms)
 
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     @reverts_task_state
@@ -1117,10 +1127,21 @@ class ComputeManager(manager.SchedulerDependentManager):
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     @reverts_task_state
     @wrap_instance_fault
-    def reboot_instance(self, context, instance, reboot_type="SOFT"):
+    def reboot_instance(self, context, instance,
+                        block_device_info=None,
+                        network_info=None,
+                        reboot_type="SOFT"):
         """Reboot an instance on this host."""
         context = context.elevated()
         LOG.audit(_("Rebooting instance"), context=context, instance=instance)
+
+        # NOTE(danms): remove these when RPC API < 2.5 compatibility
+        # is no longer needed
+        if block_device_info is None:
+            block_device_info = self._get_instance_volume_block_device_info(
+                                context, instance['uuid'])
+        if network_info is None:
+            network_info = self._get_instance_nw_info(context, instance)
 
         self._notify_about_instance_usage(context, instance, "reboot.start")
 
@@ -1136,11 +1157,6 @@ class ComputeManager(manager.SchedulerDependentManager):
                      'instance: (state: %(state)s '
                      'expected: %(running)s)') % locals(),
                      context=context, instance=instance)
-
-        network_info = self._get_instance_nw_info(context, instance)
-
-        block_device_info = self._get_instance_volume_block_device_info(
-                            context, instance['uuid'])
 
         try:
             self.driver.reboot(instance, self._legacy_nw_info(network_info),
@@ -1504,6 +1520,12 @@ class ComputeManager(manager.SchedulerDependentManager):
             self._notify_about_instance_usage(
                     context, instance, "resize.revert.start")
 
+            instance = self._instance_update(context,
+                                        instance['uuid'],
+                                        host=migration_ref['source_compute'])
+            self.network_api.setup_networks_on_host(context, instance,
+                                            migration_ref['source_compute'])
+
             old_instance_type = migration_ref['old_instance_type_id']
             instance_type = instance_types.get_instance_type(old_instance_type)
 
@@ -1526,7 +1548,6 @@ class ComputeManager(manager.SchedulerDependentManager):
             self._instance_update(context,
                                   instance['uuid'],
                                   memory_mb=instance_type['memory_mb'],
-                                  host=migration_ref['source_compute'],
                                   vcpus=instance_type['vcpus'],
                                   root_gb=instance_type['root_gb'],
                                   ephemeral_gb=instance_type['ephemeral_gb'],
@@ -1654,6 +1675,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                                      {'status': 'post-migrating'})
 
             self._instance_update(context, instance['uuid'],
+                                  host=migration_ref['dest_compute'],
                                   task_state=task_states.RESIZE_MIGRATED,
                                   expected_task_state=task_states.
                                       RESIZE_MIGRATING)
@@ -1716,7 +1738,6 @@ class ComputeManager(manager.SchedulerDependentManager):
         instance = self._instance_update(context,
                                          instance['uuid'],
                                          vm_state=vm_states.RESIZED,
-                                         host=migration_ref['dest_compute'],
                                          launched_at=timeutils.utcnow(),
                                          task_state=None,
                                          expected_task_state=task_states.
@@ -1992,7 +2013,7 @@ class ComputeManager(manager.SchedulerDependentManager):
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     @reverts_task_state
     @wrap_instance_fault
-    def reserve_block_device_name(self, context, instance, device):
+    def reserve_block_device_name(self, context, instance, device, volume_id):
 
         @utils.synchronized(instance['uuid'])
         def do_reserve():
@@ -2001,6 +2022,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                                                                 device)
             # NOTE(vish): create bdm here to avoid race condition
             values = {'instance_uuid': instance['uuid'],
+                      'volume_id': volume_id,
                       'device_name': result}
             self.db.block_device_mapping_create(context, values)
             return result
@@ -2827,8 +2849,10 @@ class ComputeManager(manager.SchedulerDependentManager):
             soft_deleted = instance.vm_state == vm_states.SOFT_DELETED
 
             if soft_deleted and old_enough:
+                bdms = self.db.block_device_mapping_get_all_by_instance(
+                    context, instance['uuid'])
                 LOG.info(_('Reclaiming deleted instance'), instance=instance)
-                self._delete_instance(context, instance)
+                self._delete_instance(context, instance, bdms)
 
     @manager.periodic_task
     def update_available_resource(self, context):
@@ -2882,6 +2906,9 @@ class ComputeManager(manager.SchedulerDependentManager):
         # NOTE(sirp): admin contexts don't ordinarily return deleted records
         with utils.temporary_mutation(context, read_deleted="yes"):
             for instance in self._running_deleted_instances(context):
+                bdms = self.db.block_device_mapping_get_all_by_instance(
+                    context, instance['uuid'])
+
                 if action == "log":
                     name = instance['name']
                     LOG.warning(_("Detected instance with name label "
@@ -2895,8 +2922,8 @@ class ComputeManager(manager.SchedulerDependentManager):
                                "'%(name)s' which is marked as "
                                "DELETED but still present on host."),
                              locals(), instance=instance)
-                    self._shutdown_instance(context, instance)
-                    self._cleanup_volumes(context, instance['uuid'])
+                    self._shutdown_instance(context, instance, bdms)
+                    self._cleanup_volumes(context, instance['uuid'], bdms)
                 else:
                     raise Exception(_("Unrecognized value '%(action)s'"
                                       " for FLAGS.running_deleted_"

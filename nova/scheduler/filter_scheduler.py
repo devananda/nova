@@ -151,8 +151,7 @@ class FilterScheduler(driver.Scheduler):
             smd_dic = None
 
         updated_instance = driver.instance_update_db(context,
-                instance_uuid, weighted_host.host_state.host,
-                system_metadata=smd_dic)
+                instance_uuid, system_metadata=smd_dic)
         # Ensure system_metadata is loaded and included in rpc payload
         updated_instance.get('system_metadata')
 

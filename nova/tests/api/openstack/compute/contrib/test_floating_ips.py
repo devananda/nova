@@ -24,6 +24,7 @@ from nova import context
 from nova import db
 from nova import exception
 from nova import network
+from nova.openstack.common import jsonutils
 from nova.openstack.common import rpc
 from nova import test
 from nova.tests.api.openstack import fakes
@@ -325,6 +326,26 @@ class FloatingIpTest(test.TestCase):
         rsp = self.manager._add_floating_ip(req, 'test_inst', body)
         self.assertTrue(rsp.status_int == 202)
 
+    def test_associate_not_allocated_floating_ip_to_instance(self):
+
+        def fake_associate_floating_ip(self, context, instance,
+                              floating_address, fixed_address,
+                              affect_auto_assigned=False):
+            raise exception.NotAuthorized()
+        self.stubs.Set(network.api.API, "associate_floating_ip",
+                       fake_associate_floating_ip)
+        floating_ip = '10.10.10.11'
+        body = dict(addFloatingIp=dict(address=floating_ip))
+        req = webob.Request.blank('/v2/fake/servers/test_inst/action')
+        req.method = "POST"
+        req.body = jsonutils.dumps(body)
+        req.headers["content-type"] = "application/json"
+        resp = req.get_response(fakes.wsgi_app())
+        res_dict = jsonutils.loads(resp.body)
+        self.assertEqual(resp.status_int, 404)
+        self.assertEqual(res_dict['itemNotFound']['message'],
+                       "floating ip not found")
+
     def test_floating_ip_disassociate(self):
         def get_instance_by_floating_ip_addr(self, context, address):
             if address == '10.10.10.10':
@@ -407,6 +428,31 @@ class FloatingIpTest(test.TestCase):
         req = fakes.HTTPRequest.blank('/v2/fake/servers/test_inst/action')
         rsp = self.manager._remove_floating_ip(req, 'test_inst', body)
         self.assertTrue(rsp.status_int == 404)
+
+    def test_floating_ip_disassociate_auto_assigned(self):
+        def fake_get_floating_ip_addr_auto_assigned(self, context, address):
+            return {'id': 1, 'address': '10.10.10.10', 'pool': 'nova',
+            'fixed_ip_id': 10, 'auto_assigned': 1}
+
+        def get_instance_by_floating_ip_addr(self, context, address):
+            if address == '10.10.10.10':
+                return 'test_inst'
+
+        def network_api_disassociate(self, context, instance,
+                                     floating_address):
+            raise exception.CannotDisassociateAutoAssignedFloatingIP()
+
+        self.stubs.Set(network.api.API, "get_floating_ip_by_address",
+                       fake_get_floating_ip_addr_auto_assigned)
+        self.stubs.Set(network.api.API, "get_instance_id_by_floating_address",
+                       get_instance_by_floating_ip_addr)
+        self.stubs.Set(network.api.API, "disassociate_floating_ip",
+                       network_api_disassociate)
+        body = dict(removeFloatingIp=dict(address='10.10.10.10'))
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/test_inst/action')
+        self.assertRaises(webob.exc.HTTPForbidden,
+                          self.manager._remove_floating_ip,
+                          req, 'test_inst', body)
 
 # these are a few bad param tests
 

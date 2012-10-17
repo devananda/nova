@@ -580,7 +580,7 @@ class FloatingIP(object):
 
         # handle auto assigned
         if not affect_auto_assigned and floating_ip.get('auto_assigned'):
-            return
+            raise exception.CannotDisassociateAutoAssignedFloatingIP()
 
         # make sure project owns this floating ip (allocated)
         self._floating_ip_owned_by_project(context, floating_ip)
@@ -787,11 +787,11 @@ class NetworkManager(manager.SchedulerDependentManager):
         if not network_driver:
             network_driver = FLAGS.network_driver
         self.driver = importutils.import_module(network_driver)
-        temp = importutils.import_object(FLAGS.instance_dns_manager)
-        self.instance_dns_manager = temp
+        self.instance_dns_manager = importutils.import_object(
+                FLAGS.instance_dns_manager)
         self.instance_dns_domain = FLAGS.instance_dns_domain
-        temp = importutils.import_object(FLAGS.floating_ip_dns_manager)
-        self.floating_dns_manager = temp
+        self.floating_dns_manager = importutils.import_object(
+                FLAGS.floating_ip_dns_manager)
         self.network_api = network_api.API()
         self.security_group_api = compute_api.SecurityGroupAPI()
         self.compute_api = compute_api.API(

@@ -101,13 +101,13 @@ def cast_to_volume_host(context, host, method, **kwargs):
     LOG.debug(_("Casted '%(method)s' to volume '%(host)s'") % locals())
 
 
-def instance_update_db(context, instance_uuid, host, system_metadata=None):
-    '''Set the host and scheduled_at fields of an Instance.
+def instance_update_db(context, instance_uuid, system_metadata=None):
+    '''Clear the host and set the scheduled_at field of an Instance.
 
     :returns: An Instance with the updated fields set properly.
     '''
     now = timeutils.utcnow()
-    values = {'host': host, 'scheduled_at': now}
+    values = {'host': None, 'scheduled_at': now}
     if system_metadata is not None:
         values['system_metadata'] = system_metadata
     return db.instance_update(context, instance_uuid, values)
@@ -118,7 +118,7 @@ def cast_to_compute_host(context, host, method, **kwargs):
 
     instance_uuid = kwargs.get('instance_uuid', None)
     if instance_uuid:
-        instance_update_db(context, instance_uuid, host)
+        instance_update_db(context, instance_uuid)
 
     rpc.cast(context,
              rpc.queue_get_for(context, 'compute', host),
@@ -126,22 +126,12 @@ def cast_to_compute_host(context, host, method, **kwargs):
     LOG.debug(_("Casted '%(method)s' to compute '%(host)s'") % locals())
 
 
-def cast_to_network_host(context, host, method, **kwargs):
-    """Cast request to a network host queue"""
-
-    rpc.cast(context,
-             rpc.queue_get_for(context, 'network', host),
-             {"method": method, "args": kwargs})
-    LOG.debug(_("Casted '%(method)s' to network '%(host)s'") % locals())
-
-
 def cast_to_host(context, topic, host, method, **kwargs):
     """Generic cast to host"""
 
     topic_mapping = {
             "compute": cast_to_compute_host,
-            "volume": cast_to_volume_host,
-            'network': cast_to_network_host}
+            "volume": cast_to_volume_host}
 
     func = topic_mapping.get(topic)
     if func:

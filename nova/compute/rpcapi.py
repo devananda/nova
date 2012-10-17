@@ -130,6 +130,9 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
         2.1 - Adds orig_sys_metadata to rebuild_instance()
         2.2 - Adds slave_info parameter to add_aggregate_host() and
               remove_aggregate_host()
+        2.3 - Adds volume_id to reserve_block_device_name()
+        2.4 - Add bdms to terminate_instance
+        2.5 - Add block device and network info to reboot_instance
     '''
 
     #
@@ -340,11 +343,16 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
                 image=image, reservations=reservations),
                 _compute_topic(self.topic, ctxt, host, None))
 
-    def reboot_instance(self, ctxt, instance, reboot_type):
+    def reboot_instance(self, ctxt, instance,
+                        block_device_info, network_info, reboot_type):
         instance_p = jsonutils.to_primitive(instance)
         self.cast(ctxt, self.make_msg('reboot_instance',
-                instance=instance_p, reboot_type=reboot_type),
-                topic=_compute_topic(self.topic, ctxt, None, instance))
+                instance=instance_p,
+                block_device_info=block_device_info,
+                network_info=network_info,
+                reboot_type=reboot_type),
+                topic=_compute_topic(self.topic, ctxt, None, instance),
+                version='2.5')
 
     def rebuild_instance(self, ctxt, instance, new_pass, injected_files,
             image_ref, orig_image_ref, orig_sys_metadata):
@@ -458,11 +466,12 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
         topic = _compute_topic(self.topic, ctxt, host, None)
         return self.call(ctxt, self.make_msg('get_host_uptime'), topic)
 
-    def reserve_block_device_name(self, ctxt, instance, device):
+    def reserve_block_device_name(self, ctxt, instance, device, volume_id):
         instance_p = jsonutils.to_primitive(instance)
         return self.call(ctxt, self.make_msg('reserve_block_device_name',
-                instance=instance_p, device=device),
-                topic=_compute_topic(self.topic, ctxt, None, instance))
+                instance=instance_p, device=device, volume_id=volume_id),
+                topic=_compute_topic(self.topic, ctxt, None, instance),
+                version='2.3')
 
     def snapshot_instance(self, ctxt, instance, image_id, image_type,
             backup_type, rotation):
@@ -492,11 +501,12 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
                 instance=instance_p),
                 topic=_compute_topic(self.topic, ctxt, None, instance))
 
-    def terminate_instance(self, ctxt, instance):
+    def terminate_instance(self, ctxt, instance, bdms):
         instance_p = jsonutils.to_primitive(instance)
         self.cast(ctxt, self.make_msg('terminate_instance',
-                instance=instance_p),
-                topic=_compute_topic(self.topic, ctxt, None, instance))
+                instance=instance_p, bdms=bdms),
+                topic=_compute_topic(self.topic, ctxt, None, instance),
+                version='2.4')
 
     def unpause_instance(self, ctxt, instance):
         instance_p = jsonutils.to_primitive(instance)

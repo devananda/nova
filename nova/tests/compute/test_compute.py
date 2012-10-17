@@ -219,7 +219,7 @@ class ComputeTestCase(BaseTestCase):
         self.stubs.Set(compute_utils, 'add_instance_fault_from_exc',
                        did_it_add_fault)
 
-        @nova.compute.manager.wrap_instance_fault
+        @compute_manager.wrap_instance_fault
         def failer(self2, context, instance):
             raise NotImplementedError()
 
@@ -239,7 +239,7 @@ class ComputeTestCase(BaseTestCase):
         self.stubs.Set(compute_utils, 'add_instance_fault_from_exc',
                        did_it_add_fault)
 
-        @nova.compute.manager.wrap_instance_fault
+        @compute_manager.wrap_instance_fault
         def failer(self2, context, instance_uuid):
             raise exception.InstanceNotFound()
 
@@ -871,6 +871,15 @@ class ComputeTestCase(BaseTestCase):
         self.compute.terminate_instance(self.context,
                 instance=jsonutils.to_primitive(instance))
 
+    def _stub_out_reboot(self, fake_net_info, fake_block_dev_info):
+        def fake_reboot(driver, inst, net_info, reboot_type, block_dev_info):
+            self.assertEqual(block_dev_info, fake_block_dev_info)
+            self.assertEqual(net_info, fake_net_info)
+
+        self.stubs.Set(nova.virt.fake.FakeDriver, 'legacy_nwinfo',
+                       lambda x: False)
+        self.stubs.Set(nova.virt.fake.FakeDriver, 'reboot', fake_reboot)
+
     def test_reboot_soft(self):
         """Ensure instance can be soft rebooted"""
         instance = jsonutils.to_primitive(self._create_fake_instance())
@@ -879,8 +888,12 @@ class ComputeTestCase(BaseTestCase):
                            {'task_state': task_states.REBOOTING})
 
         reboot_type = "SOFT"
-        self.compute.reboot_instance(self.context,
-                                     instance=instance,
+        fake_net_info = {'bar': 'baz'}
+        fake_block_dev_info = {'foo': 'bar'}
+        self._stub_out_reboot(fake_net_info, fake_block_dev_info)
+        self.compute.reboot_instance(self.context, instance=instance,
+                                     network_info=fake_net_info,
+                                     block_device_info=fake_block_dev_info,
                                      reboot_type=reboot_type)
 
         inst_ref = db.instance_get_by_uuid(self.context, instance['uuid'])
@@ -898,7 +911,12 @@ class ComputeTestCase(BaseTestCase):
                            {'task_state': task_states.REBOOTING_HARD})
 
         reboot_type = "HARD"
+        fake_net_info = {'bar': 'baz'}
+        fake_block_dev_info = {'foo': 'bar'}
+        self._stub_out_reboot(fake_net_info, fake_block_dev_info)
         self.compute.reboot_instance(self.context, instance=instance,
+                                     network_info=fake_net_info,
+                                     block_device_info=fake_block_dev_info,
                                      reboot_type=reboot_type)
 
         inst_ref = db.instance_get_by_uuid(self.context, instance['uuid'])
@@ -1350,7 +1368,8 @@ class ComputeTestCase(BaseTestCase):
                        fake_cleanup_volumes)
 
         self.compute._delete_instance(self.context,
-                instance=jsonutils.to_primitive(instance))
+                instance=jsonutils.to_primitive(instance),
+                bdms={})
 
     def test_instance_termination_exception_sets_error(self):
         """Test that we handle InstanceTerminationFailure
@@ -1358,7 +1377,7 @@ class ComputeTestCase(BaseTestCase):
         """
         instance = self._create_fake_instance()
 
-        def fake_delete_instance(context, instance):
+        def fake_delete_instance(context, instance, bdms):
             raise exception.InstanceTerminationFailure(reason='')
 
         self.stubs.Set(self.compute, '_delete_instance',
@@ -1823,6 +1842,9 @@ class ComputeTestCase(BaseTestCase):
         self.compute.resize_instance(context, instance=instance,
                                      migration_id=migration_ref['id'],
                                      image={})
+        inst = db.instance_get_by_uuid(context, instance['uuid'])
+        self.assertEqual(migration_ref['dest_compute'], inst['host'])
+
         self.compute.terminate_instance(context,
             instance=jsonutils.to_primitive(instance))
 
@@ -1883,6 +1905,15 @@ class ComputeTestCase(BaseTestCase):
         self.compute.revert_resize(context,
                 migration_id=migration_ref['id'], instance=rpcinst,
                 reservations=reservations)
+
+        def fake_setup_networks_on_host(cls, ctxt, instance, host):
+            self.assertEqual(host, migration_ref['source_compute'])
+            inst = db.instance_get_by_uuid(ctxt, instance['uuid'])
+            self.assertEqual(host, inst['host'])
+
+        self.stubs.Set(network_api.API, 'setup_networks_on_host',
+                       fake_setup_networks_on_host)
+
         self.compute.finish_revert_resize(context,
                 migration_id=migration_ref['id'], instance=rpcinst,
                 reservations=reservations)
@@ -2358,13 +2389,17 @@ class ComputeTestCase(BaseTestCase):
                                                  self.compute.host
                                                 ).AndReturn([instance])
 
+        bdms = []
+
         self.mox.StubOutWithMock(self.compute, "_shutdown_instance")
         self.compute._shutdown_instance(admin_context,
-                                        instance).AndReturn(None)
+                                        instance,
+                                        bdms).AndReturn(None)
 
         self.mox.StubOutWithMock(self.compute, "_cleanup_volumes")
         self.compute._cleanup_volumes(admin_context,
-                                      instance['uuid']).AndReturn(None)
+                                      instance['uuid'],
+                                      bdms).AndReturn(None)
 
         self.mox.ReplayAll()
         self.compute._cleanup_running_deleted_instances(admin_context)
@@ -2668,7 +2703,7 @@ class ComputeAPITestCase(BaseTestCase):
         super(ComputeAPITestCase, self).setUp()
         self.stubs.Set(network_api.API, 'get_instance_nw_info',
                        fake_get_nw_info)
-        self.security_group_api = compute.api.SecurityGroupAPI()
+        self.security_group_api = compute_api.SecurityGroupAPI()
         self.compute_api = compute.API(
                                    security_group_api=self.security_group_api)
         self.fake_image = {
@@ -3264,15 +3299,40 @@ class ComputeAPITestCase(BaseTestCase):
                 'preserved': 'preserve this!'})
         db.instance_destroy(self.context, instance['uuid'])
 
+    def _stub_out_reboot(self, volume_id):
+        def fake_reboot_instance(rpcapi, context, instance,
+                                 block_device_info,
+                                 network_info,
+                                 reboot_type):
+            self.assertEqual(
+                block_device_info['block_device_mapping'][0]['mount_device'],
+                volume_id)
+            self.assertEqual(network_info[0]['network']['bridge'], 'fake_br1')
+        self.stubs.Set(nova.compute.rpcapi.ComputeAPI, 'reboot_instance',
+                       fake_reboot_instance)
+
+        self.stubs.Set(nova.virt.fake.FakeDriver, 'legacy_nwinfo',
+                       lambda x: False)
+
     def test_reboot_soft(self):
         """Ensure instance can be soft rebooted"""
         instance = jsonutils.to_primitive(self._create_fake_instance())
         self.compute.run_instance(self.context, instance=instance)
 
+        volume_id = db.volume_create(context.get_admin_context(),
+                                     {'size': 1})['id']
+        volume = {'instance_uuid': instance['uuid'],
+                  'device_name': '/dev/vdc',
+                  'delete_on_termination': False,
+                  'connection_info': '{"foo": "bar"}',
+                  'volume_id': volume_id}
+        db.block_device_mapping_create(self.context, volume)
+
         inst_ref = db.instance_get_by_uuid(self.context, instance['uuid'])
         self.assertEqual(inst_ref['task_state'], None)
 
         reboot_type = "SOFT"
+        self._stub_out_reboot(volume_id)
         self.compute_api.reboot(self.context, inst_ref, reboot_type)
 
         inst_ref = db.instance_get_by_uuid(self.context, inst_ref['uuid'])
@@ -3285,10 +3345,20 @@ class ComputeAPITestCase(BaseTestCase):
         instance = jsonutils.to_primitive(self._create_fake_instance())
         self.compute.run_instance(self.context, instance=instance)
 
+        volume_id = db.volume_create(context.get_admin_context(),
+                                     {'size': 1})['id']
+        volume = {'instance_uuid': instance['uuid'],
+                  'device_name': '/dev/vdc',
+                  'delete_on_termination': False,
+                  'connection_info': '{"foo": "bar"}',
+                  'volume_id': volume_id}
+        db.block_device_mapping_create(self.context, volume)
+
         inst_ref = db.instance_get_by_uuid(self.context, instance['uuid'])
         self.assertEqual(inst_ref['task_state'], None)
 
         reboot_type = "HARD"
+        self._stub_out_reboot(volume_id)
         self.compute_api.reboot(self.context, inst_ref, reboot_type)
 
         inst_ref = db.instance_get_by_uuid(self.context, inst_ref['uuid'])
@@ -4491,6 +4561,34 @@ class ComputeAPITestCase(BaseTestCase):
         self.stubs.Set(compute_rpcapi.ComputeAPI, 'attach_volume',
                        fake_rpc_attach_volume)
 
+    def test_terminate_with_volumes(self):
+        """Make sure that volumes get detached during instance termination"""
+        admin = context.get_admin_context()
+        instance = self._create_fake_instance()
+
+        # Create a volume and attach it to our instance
+        volume_id = db.volume_create(admin, {'size': 1})['id']
+        values = {'instance_uuid': instance['uuid'],
+                  'device_name': '/dev/vdc',
+                  'delete_on_termination': False,
+                  'volume_id': volume_id,
+                  }
+        db.block_device_mapping_create(admin, values)
+        db.volume_attached(admin, volume_id, instance["uuid"],
+                           "/dev/vdc")
+
+        # Stub out and record whether it gets detached
+        result = {"detached": False}
+
+        def fake_detach(self, context, volume):
+            result["detached"] = volume["id"] == volume_id
+        self.stubs.Set(nova.volume.api.API, "detach", fake_detach)
+
+        # Kill the instance and check that it was detached
+        self.compute.terminate_instance(admin, instance=instance)
+        self.assertTrue(result["detached"])
+
+    def test_inject_network_info(self):
         instance = self._create_fake_instance()
         self.compute_api.attach_volume(self.context, instance, 1, device=None)
         self.assertTrue(called.get('fake_check_attach'))
@@ -4917,7 +5015,7 @@ class ComputePolicyTestCase(BaseTestCase):
         self.mox.StubOutWithMock(nova.policy, 'enforce')
         nova.policy.enforce(self.context, 'compute:reboot', {})
         self.mox.ReplayAll()
-        nova.compute.api.check_policy(self.context, 'reboot', {})
+        compute_api.check_policy(self.context, 'reboot', {})
 
     def test_wrapped_method(self):
         instance = self._create_fake_instance(params={'host': None})

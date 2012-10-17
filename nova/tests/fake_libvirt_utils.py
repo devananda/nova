@@ -21,6 +21,7 @@ import StringIO
 files = {}
 disk_sizes = {}
 disk_backing_files = {}
+disk_type = "qcow2"
 
 
 def get_iscsi_initiator():
@@ -37,6 +38,10 @@ def create_cow_image(backing_file, path):
 
 def get_disk_backing_file(path):
     return disk_backing_files.get(path, None)
+
+
+def get_disk_type(path):
+    return disk_type
 
 
 def copy_image(src, dest):
@@ -99,7 +104,7 @@ def file_open(path, mode=None):
 
 
 def find_disk(virt_dom):
-    return "some/path"
+    return "filename"
 
 
 def load_file(path):
@@ -108,6 +113,10 @@ def load_file(path):
             return fp.read()
     else:
         return ''
+
+
+def logical_volume_info(path):
+    return {}
 
 
 def file_delete(path):

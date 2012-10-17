@@ -14,19 +14,23 @@
 #    under the License.
 
 import base64
+import datetime
 import os
 import re
+import urllib
 import uuid
 
 from lxml import etree
 
 from nova.cloudpipe.pipelib import CloudPipe
+from nova.compute import api
 from nova import context
 from nova import flags
 from nova.network.manager import NetworkManager
 from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
 from nova.openstack.common.log import logging
+from nova.openstack.common import timeutils
 from nova import test
 from nova.tests import fake_network
 from nova.tests.image import fake
@@ -224,6 +228,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                   '-[0-9a-f]{4}-[0-9a-f]{12})',
             'uuid': '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}'
                     '-[0-9a-f]{4}-[0-9a-f]{12}',
+            'reservation_id': 'r-[0-9a-zA-Z]{8}',
             'private_key': '-----BEGIN RSA PRIVATE KEY-----'
                            '[a-zA-Z0-9\n/+=]*'
                            '-----END RSA PRIVATE KEY-----',
@@ -1113,7 +1118,6 @@ class AggregatesSampleJsonTest(ServersSampleBase):
     def test_add_host(self):
         aggregate_id = self.test_aggregate_create()
         subs = {
-            "action": "add_host",
             "host_name": self.compute.host,
         }
         response = self._do_post('os-aggregates/%s/action' % aggregate_id,
@@ -1125,7 +1129,6 @@ class AggregatesSampleJsonTest(ServersSampleBase):
     def test_remove_host(self):
         self.test_add_host()
         subs = {
-            "action": "add_host",
             "host_name": self.compute.host,
         }
         response = self._do_post('os-aggregates/1/action',
@@ -1170,4 +1173,99 @@ class CertificatesSamplesJsonTest(ApiSampleTestBase):
 
 
 class CertificatesSamplesXmlTest(CertificatesSamplesJsonTest):
+    ctype = 'xml'
+
+
+class UsedLimitsSamplesJsonTest(ApiSampleTestBase):
+    extension_name = ("nova.api.openstack.compute.contrib.used_limits."
+                      "Used_limits")
+
+    def test_get_used_limits(self):
+        """Get api sample to used limits"""
+        response = self._do_get('limits')
+        self.assertEqual(response.status, 200)
+        subs = self._get_regexes()
+        return self._verify_response('usedlimits-get-resp', subs, response)
+
+
+class UsedLimitsSamplesXmlTest(UsedLimitsSamplesJsonTest):
+    ctype = "xml"
+
+
+class MultipleCreateJsonTest(ServersSampleBase):
+    extension_name = ("nova.api.openstack.compute.contrib.multiple_create."
+                      "Multiple_create")
+
+    def test_multiple_create(self):
+        subs = {
+            'image_id': fake.get_valid_image_id(),
+            'host': self._get_host(),
+            'min_count': "2",
+            'max_count': "3"
+        }
+        response = self._do_post('servers', 'multiple-create-post-req', subs)
+        self.assertEqual(response.status, 202)
+        subs.update(self._get_regexes())
+        return self._verify_response('multiple-create-post-resp',
+                                      subs, response)
+
+    def test_multiple_create_without_reservation_id(self):
+        subs = {
+            'image_id': fake.get_valid_image_id(),
+            'host': self._get_host(),
+            'min_count': "2",
+            'max_count': "3"
+        }
+        response = self._do_post('servers', 'multiple-create-no-resv-post-req',
+                                  subs)
+        self.assertEqual(response.status, 202)
+        subs.update(self._get_regexes())
+        return self._verify_response('multiple-create-no-resv-post-resp',
+                                      subs, response)
+
+
+class MultipleCreateXmlTest(MultipleCreateJsonTest):
+    ctype = 'xml'
+
+
+class SimpleTenantUsageSampleJsonTest(ServersSampleBase):
+    extension_name = ("nova.api.openstack.compute.contrib.simple_tenant_usage."
+                      "Simple_tenant_usage")
+
+    def setUp(self):
+        """setUp method for simple tenant usage"""
+        super(SimpleTenantUsageSampleJsonTest, self).setUp()
+        self._post_server()
+        timeutils.set_time_override(timeutils.utcnow() +
+                                    datetime.timedelta(hours=1))
+        self.query = {
+            'start': str(timeutils.utcnow() - datetime.timedelta(hours=1)),
+            'end': str(timeutils.utcnow())
+        }
+
+    def tearDown(self):
+        """tearDown method for simple tenant usage"""
+        super(SimpleTenantUsageSampleJsonTest, self).tearDown()
+        timeutils.clear_time_override()
+
+    def test_get_tenants_usage(self):
+        """Get api sample to get all tenants usage request"""
+        response = self._do_get('os-simple-tenant-usage?%s' % (
+                                                urllib.urlencode(self.query)))
+        self.assertEqual(response.status, 200)
+        subs = self._get_regexes()
+        self._verify_response('simple-tenant-usage-get', subs, response)
+
+    def test_get_tenant_usage_details(self):
+        """Get api sample to get specific tenant usage request"""
+        tenant_id = 'openstack'
+        response = self._do_get('os-simple-tenant-usage/%s?%s' % (tenant_id,
+                                                urllib.urlencode(self.query)))
+        self.assertEqual(response.status, 200)
+        subs = self._get_regexes()
+        self._verify_response('simple-tenant-usage-get-specific', subs,
+                              response)
+
+
+class SimpleTenantUsageSampleXmlTest(SimpleTenantUsageSampleJsonTest):
     ctype = "xml"
