@@ -60,7 +60,7 @@ class BaremetalIPMITestCase(test.TestCase):
         self.assertEqual(os.stat(path)[stat.ST_MODE] & 0777, 0600)
         try:
             with open(path, "r") as f:
-                s = f.read(100)
+                s = f.read()
             self.assertEqual(s, PASSWORD)
         finally:
             os.unlink(path)
