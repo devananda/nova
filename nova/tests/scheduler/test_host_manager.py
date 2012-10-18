@@ -301,3 +301,13 @@ class HostStateTestCase(test.TestCase):
         self.assertEqual(1, host.task_states[None])
         self.assertEqual(2, host.num_instances_by_os_type['Linux'])
         self.assertEqual(1, host.num_io_ops)
+
+    def test_nodename_set(self):
+        cap = {'faketopic': {'node': 'fakenode'}}
+        host = host_manager.HostState("fakehost", "faketopic",
+                                      capabilities=cap)
+        self.assertEqual('fakenode', host.nodename)
+
+    def test_nodename_not_set(self):
+        host = host_manager.HostState("fakehost", "faketopic")
+        self.assertTrue(host.nodename is None)
