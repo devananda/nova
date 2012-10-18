@@ -14,11 +14,12 @@
 #    under the License.
 
 """
-Tests for baremetal ipmi driver.
+Tests for bare-metal ipmi driver.
 """
 
 import os
 import stat
+import time
 
 import mox
 
@@ -27,12 +28,13 @@ from nova import test
 from nova import utils as nova_utils
 
 from nova.tests.baremetal.db import utils
+from nova.virt.baremetal import baremetal_states
 from nova.virt.baremetal import ipmi
 
 FLAGS = flags.FLAGS
 
 
-class BaremetalIPMITestCase(test.TestCase):
+class BareMetalIPMITestCase(test.TestCase):
 
     def test_ipmi(self):
         n1 = utils.new_bm_node(
@@ -96,3 +98,44 @@ class BaremetalIPMITestCase(test.TestCase):
         i = ipmi.Ipmi(n1)
         i._exec_ipmitool('A B C')
         self.mox.VerifyAll()
+
+class BareMetalIPMIRetryTestCase(test.TestCase):
+    
+    def setUp(self):
+        super(BareMetalIPMIRetryTestCase, self).setUp()
+        self.retry = 10
+        self.wait = 60
+        self.flags(baremetal_ipmi_power_retry=self.retry,
+                   baremetal_ipmi_power_wait=self.wait)
+        n = utils.new_bm_node(
+                pm_address='fake-address',
+                pm_user='fake-user',
+                pm_password='fake-password')
+        self.ipmi = ipmi.Ipmi(n)
+
+    def test_power_on(self):
+        self.mox.StubOutWithMock(self.ipmi, 'is_power_on')
+        self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
+        self.mox.StubOutWithMock(time, 'sleep')
+        for _ in range(self.retry):
+            self.ipmi.is_power_on().AndReturn(False)
+            self.ipmi._exec_ipmitool("power on")
+            time.sleep(self.wait)
+        self.ipmi.is_power_on().AndReturn(False)
+        self.mox.ReplayAll()
+        ret = self.ipmi._power_on()
+        self.assertEqual(baremetal_states.ERROR, ret)
+
+    def test_power_off(self):
+        self.mox.StubOutWithMock(self.ipmi, '_is_power_off')
+        self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
+        self.mox.StubOutWithMock(time, 'sleep')
+        for _ in range(self.retry):
+            self.ipmi._is_power_off().AndReturn(False)
+            self.ipmi._exec_ipmitool("power off")
+            time.sleep(self.wait)
+        self.ipmi._is_power_off().AndReturn(False)
+        self.mox.ReplayAll()
+        ret = self.ipmi._power_off()
+        self.assertEqual(baremetal_states.ERROR, ret)
+
