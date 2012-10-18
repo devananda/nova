@@ -380,8 +380,7 @@ class HostManager(object):
             capabilities = self.service_states.get(state_key, None)
             host_state = self.host_state_cls(host, topic,
                     capabilities=capabilities,
-                    service=dict(service.iteritems()),
-                    nodename=nodename)
+                    service=dict(service.iteritems()))
             host_state.update_from_compute_node(compute)
             host_state_map[state_key] = host_state
 
