@@ -41,6 +41,13 @@ opts = [
     cfg.StrOpt('baremetal_term_pid_dir',
                default='/var/lib/nova/baremetal/console',
                help='path to directory stores pidfiles of baremetal_term'),
+    cfg.IntOpt('baremetal_ipmi_power_retry',
+               default=3,
+               help='maximal number of retries for IPMI operations'),
+    cfg.IntOpt('baremetal_ipmi_power_wait',
+               default=5,
+               help='wait time in seconds until check the result '
+                    'after IPMI power operations'),
     ]
 
 FLAGS = flags.FLAGS
@@ -126,26 +133,26 @@ class Ipmi(object):
         count = 0
         while not self.is_power_on():
             count += 1
-            if count > 3:
+            if count > FLAGS.baremetal_ipmi_power_retry:
                 return baremetal_states.ERROR
             try:
                 self._exec_ipmitool("power on")
             except Exception:
                 LOG.exception("power_on failed")
-            time.sleep(5)
+            time.sleep(FLAGS.baremetal_ipmi_power_wait)
         return baremetal_states.ACTIVE
 
     def _power_off(self):
         count = 0
         while not self._is_power_off():
             count += 1
-            if count > 3:
+            if count > FLAGS.baremetal_ipmi_power_retry:
                 return baremetal_states.ERROR
             try:
                 self._exec_ipmitool("power off")
             except Exception:
                 LOG.exception("power_off failed")
-            time.sleep(5)
+            time.sleep(FLAGS.baremetal_ipmi_power_wait)
         return baremetal_states.DELETED
 
     def _power_status(self):
@@ -193,7 +200,7 @@ class Ipmi(object):
 
         args.append(ipmi_args)
         # Run shellinaboxd without pipes. Otherwise utils.execute() waits
-        # infinitly since shellinaboxd does not close passed fds.
+        # infinitely since shellinaboxd does not close passed fds.
         x = ["'" + arg.replace("'", "'\\''") + "'" for arg in args]
         x.append('</dev/null')
         x.append('>/dev/null')
