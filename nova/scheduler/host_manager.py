@@ -93,17 +93,26 @@ class HostState(object):
     previously used and lock down access.
     """
 
-    def __init__(self, host, topic, capabilities=None, service=None,
-                 nodename=None):
+    def __init__(self, host, topic, capabilities=None, service=None):
         self.host = host
         self.topic = topic
-        self.nodename = nodename
 
         # Read-only capability dicts
 
         if capabilities is None:
             capabilities = {}
         self.capabilities = ReadOnlyDict(capabilities.get(topic, None))
+
+        # Check if the service is really using multi-node.
+        # Scheduler doesn't use 'node' if the compute is single-node
+        self.nodename = self.capabilities.get('node')
+        if self.nodename != self.capabilities.get('hypervisor_hostname'):
+            LOG.warn(_('node(%(node)s) and hypervisor_hostname(%(hvhn)s) '
+                       'are not same in capabilities from %(host)s'),
+                      {'node': self.nodename,
+                       'hvhn': self.capabilities.get('hypervisor_hostname'),
+                       'host': self.host})
+
         if service is None:
             service = {}
         self.service = ReadOnlyDict(service)
@@ -320,17 +329,21 @@ class HostManager(object):
 
     def update_service_capabilities(self, service_name, host, capabilities):
         """Update the per-service capabilities based on this notification."""
-        node = capabilities.get('hypervisor_hostname')
-        if node is not None:
-            host = "%s/%s" % (host, node)
+        # services_states is always keyed by 'host/hypervisor_hostname'
+        # regardless of whether the service is multi-node or not.
+        nodename = capabilities.get('hypervisor_hostname')
+        if nodename is not None:
+            state_key = "%s/%s" % (host, nodename)
+        else:
+            state_key = host
         LOG.debug(_("Received %(service_name)s service update from "
-                    "%(host)s.") % locals())
-        service_caps = self.service_states.get(host, {})
+                    "%(state_key)s.") % locals())
+        service_caps = self.service_states.get(state_key, {})
         # Copy the capabilities, so we don't modify the original dict
         capab_copy = dict(capabilities)
         capab_copy["timestamp"] = timeutils.utcnow()  # Reported time
         service_caps[service_name] = capab_copy
-        self.service_states[host] = service_caps
+        self.service_states[state_key] = service_caps
 
     def get_all_host_states(self, context, topic):
         """Returns a dict of all the hosts the HostManager
@@ -361,15 +374,15 @@ class HostManager(object):
             host = service['host']
             nodename = compute.get('hypervisor_hostname')
             if nodename is not None:
-                host_node = '%s/%s' % (host, nodename)
+                state_key = '%s/%s' % (host, nodename)
             else:
-                host_node = host
-            capabilities = self.service_states.get(host_node, None)
+                state_key = host
+            capabilities = self.service_states.get(state_key, None)
             host_state = self.host_state_cls(host, topic,
                     capabilities=capabilities,
                     service=dict(service.iteritems()),
                     nodename=nodename)
             host_state.update_from_compute_node(compute)
-            host_state_map[host_node] = host_state
+            host_state_map[state_key] = host_state
 
         return host_state_map

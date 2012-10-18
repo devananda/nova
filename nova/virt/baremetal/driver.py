@@ -408,6 +408,7 @@ class BareMetalDriver(driver.ComputeDriver):
                                      service_host=FLAGS.host)
         for node in nodes:
             res = self._node_resource(node)
+            nodename = str(node['id'])
             data = {}
             data['vcpus'] = res['vcpus']
             data['vcpus_used'] = res['vcpus_used']
@@ -419,11 +420,11 @@ class BareMetalDriver(driver.ComputeDriver):
             data['host_memory_free'] = res['memory_mb'] - res['memory_mb_used']
             data['hypervisor_type'] = res['hypervisor_type']
             data['hypervisor_version'] = res['hypervisor_version']
-            data['hypervisor_hostname'] = str(node['id'])
+            data['hypervisor_hostname'] = nodename
             data['supported_instances'] = self._supported_instances
             data.update(self._extra_specs)
             data['host'] = FLAGS.host
-            data['node'] = str(node['id'])
+            data['node'] = nodename
             # TODO(NTTdocomo): put node's extra specs here
             caps.append(data)
         return caps
