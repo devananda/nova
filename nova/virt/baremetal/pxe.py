@@ -25,6 +25,7 @@ import shutil
 from nova.compute import instance_types
 from nova import exception
 from nova import flags
+from nova.network import linux_net
 from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova import utils
@@ -120,17 +121,17 @@ def _random_alnum(count):
 
 def _start_dnsmasq(interface, tftp_root, client_address, pid_path, lease_path):
     utils.execute('dnsmasq',
-             '--conf-file=',
-             '--pid-file=%s' % pid_path,
-             '--dhcp-leasefile=%s' % lease_path,
-             '--port=0',
-             '--bind-interfaces',
-             '--interface=%s' % interface,
-             '--enable-tftp',
-             '--tftp-root=%s' % tftp_root,
-             '--dhcp-boot=pxelinux.0',
-             '--dhcp-range=%s,%s' % (client_address, client_address),
-             run_as_root=True)
+                  '--conf-file=',
+                  '--pid-file=%s' % pid_path,
+                  '--dhcp-leasefile=%s' % lease_path,
+                  '--port=0',
+                  '--bind-interfaces',
+                  '--interface=%s' % interface,
+                  '--enable-tftp',
+                  '--tftp-root=%s' % tftp_root,
+                  '--dhcp-boot=pxelinux.0',
+                  '--dhcp-range=%s,%s' % (client_address, client_address),
+                  run_as_root=True)
 
 
 def _cache_image_x(context, target, image_id,
@@ -184,8 +185,6 @@ def _start_per_host_pxe_server(tftp_root, vlan_id,
 
     pxe_interface = vlan.ensure_vlan(vlan_id, parent_interface)
 
-    from nova.network import linux_net
-
     chain = 'bm-%s' % pxe_interface
     iptables = linux_net.iptables_manager
     f = iptables.ipv4['filter']
@@ -197,12 +196,12 @@ def _start_per_host_pxe_server(tftp_root, vlan_id,
     iptables.apply()
 
     utils.execute('ip', 'address',
-            'add', server_address + '/24',
-            'dev', pxe_interface,
-            run_as_root=True)
+                  'add', server_address + '/24',
+                  'dev', pxe_interface,
+                  run_as_root=True)
     utils.execute('ip', 'route', 'add',
-            client_address, 'scope', 'host', 'dev', pxe_interface,
-            run_as_root=True)
+                  client_address, 'scope', 'host', 'dev', pxe_interface,
+                  run_as_root=True)
 
     shutil.copyfile(FLAGS.baremetal_pxelinux_path,
                     os.path.join(tftp_root, 'pxelinux.0'))
@@ -228,7 +227,6 @@ def _stop_per_host_pxe_server(tftp_root, vlan_id):
 
     shutil.rmtree(os.path.join(tftp_root, 'pxelinux.cfg'), ignore_errors=True)
 
-    from nova.network import linux_net
     chain = 'bm-%s' % pxe_interface
     iptables = linux_net.iptables_manager
     iptables.ipv4['filter'].remove_chain(chain)
@@ -276,18 +274,16 @@ class PXE(object):
         # rename nics to be in the order in the DB
         LOG.debug("injecting persistent net")
         rules = ""
-        i = 0
-        for hwaddr in nics_in_order:
+        for (i, hwaddr) in enumerate(nics_in_order):
             rules += 'SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ' \
                      'ATTR{address}=="%s", ATTR{dev_id}=="0x0", ' \
                      'ATTR{type}=="1", KERNEL=="eth*", NAME="eth%d"\n' \
                      % (hwaddr.lower(), i)
-            i += 1
         if not injected_files:
             injected_files = []
         injected_files.append(('/etc/udev/rules.d/70-persistent-net.rules',
                                rules))
-        bootif_name = "eth%d" % (i - 1)
+        bootif_name = "eth%d" % (i + 1)
 
         if inst['key_data']:
             key = str(inst['key_data'])
@@ -296,13 +292,8 @@ class PXE(object):
         net = ""
         nets = []
         ifc_template = open(FLAGS.baremetal_injected_network_template).read()
-        ifc_num = -1
         have_injected_networks = False
-        for (network_ref, mapping) in network_info:
-            ifc_num += 1
-            # always inject
-            #if not network_ref['injected']:
-            #    continue
+        for (ifc_num, (network_ref, mapping)) in network_info:
             have_injected_networks = True
             address = mapping['ips'][0]['ip']
             netmask = mapping['ips'][0]['netmask']
@@ -314,20 +305,21 @@ class PXE(object):
                 netmask_v6 = mapping['ip6s'][0]['netmask']
                 gateway_v6 = mapping['gateway_v6']
             name = 'eth%d' % ifc_num
-            if FLAGS.baremetal_use_unsafe_vlan \
-                    and mapping['should_create_vlan'] \
-                    and network_ref.get('vlan'):
+            if (FLAGS.baremetal_use_unsafe_vlan 
+                    and mapping['should_create_vlan'] 
+                    and network_ref.get('vlan')):
                 name = 'eth%d.%d' % (ifc_num, network_ref.get('vlan'))
             net_info = {'name': name,
-                   'address': address,
-                   'netmask': netmask,
-                   'gateway': mapping['gateway'],
-                   'broadcast': mapping['broadcast'],
-                   'dns': ' '.join(mapping['dns']),
-                   'address_v6': address_v6,
-                   'gateway_v6': gateway_v6,
-                   'netmask_v6': netmask_v6,
-                   'hwaddress': mapping['mac']}
+                        'address': address,
+                        'netmask': netmask,
+                        'gateway': mapping['gateway'],
+                        'broadcast': mapping['broadcast'],
+                        'dns': ' '.join(mapping['dns']),
+                        'address_v6': address_v6,
+                        'gateway_v6': gateway_v6,
+                        'netmask_v6': netmask_v6,
+                        'hwaddress': mapping['mac'],
+                        }
             nets.append(net_info)
 
         if have_injected_networks:
