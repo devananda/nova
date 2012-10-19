@@ -289,12 +289,8 @@ class PXE(object):
             key = str(inst['key_data'])
         else:
             key = None
-        net = ""
         nets = []
-        ifc_template = open(FLAGS.baremetal_injected_network_template).read()
-        have_injected_networks = False
-        for (ifc_num, (network_ref, mapping)) in network_info:
-            have_injected_networks = True
+        for (ifc_num, (network_ref, mapping)) in enumerate(network_info):
             address = mapping['ips'][0]['ip']
             netmask = mapping['ips'][0]['netmask']
             address_v6 = None
@@ -322,11 +318,12 @@ class PXE(object):
                         }
             nets.append(net_info)
 
-        if have_injected_networks:
-            _late_load_cheetah()
-            net = str(Template(ifc_template,
-                               searchList=[{'interfaces': nets,
-                                            'use_ipv6': FLAGS.use_ipv6}]))
+        ifc_template = open(FLAGS.baremetal_injected_network_template).read()
+        _late_load_cheetah()
+        net = str(Template(ifc_template,
+                           searchList=[{'interfaces': nets,
+                                        'use_ipv6': FLAGS.use_ipv6,
+                                        }]))
         net += "\n"
         net += "auto %s\n" % bootif_name
         net += "iface %s inet dhcp\n" % bootif_name
