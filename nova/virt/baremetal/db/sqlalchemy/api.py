@@ -326,9 +326,13 @@ def bm_interface_set_vif_uuid(context, if_id, vif_uuid, session=None):
                          with_lockmode('update').\
                          first()
         if not ref:
-            raise exception.NovaException()
+            raise exception.DBError()
         ref.vif_uuid = vif_uuid
-        session.add(ref)
+        try:
+            session.add(ref)
+            session.flush()
+        except IntegrityError:
+            raise exception.DBError()
 
 
 @require_admin_context

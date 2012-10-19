@@ -33,6 +33,7 @@ from nova.openstack.common import log as logging
 from nova.db.sqlalchemy.session import add_regexp_listener
 from nova.db.sqlalchemy.session import debug_mysql_do_query
 from nova.db.sqlalchemy.session import get_maker
+from nova.db.sqlalchemy.session import greenthread_yield
 from nova.db.sqlalchemy.session import is_db_connection_error
 from nova.db.sqlalchemy.session import ping_listener
 from nova.db.sqlalchemy.session import synchronous_switch_listener
@@ -56,6 +57,7 @@ _MAKER = None
 def get_session(autocommit=True, expire_on_commit=False):
     """Return a SQLAlchemy session."""
     global _MAKER
+
     if _MAKER is None:
         engine = get_engine()
         _MAKER = get_maker(engine, autocommit, expire_on_commit)
@@ -94,10 +96,11 @@ def get_engine():
 
         _ENGINE = sqlalchemy.create_engine(FLAGS.baremetal_sql_connection,
                                            **engine_args)
+        sqlalchemy.event.listen(_ENGINE, 'checkin', greenthread_yield)
 
         if 'mysql' in connection_dict.drivername:
             sqlalchemy.event.listen(_ENGINE, 'checkout', ping_listener)
-        elif "sqlite" in connection_dict.drivername:
+        elif 'sqlite' in connection_dict.drivername:
             if not FLAGS.sqlite_synchronous:
                 sqlalchemy.event.listen(_ENGINE, 'connect',
                                         synchronous_switch_listener)
