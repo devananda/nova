@@ -398,9 +398,6 @@ class BareMetalDriver(driver.ComputeDriver):
         self._firewall_driver.unfilter_instance(instance_ref,
                                                 network_info=network_info)
 
-    def update_host_status(self):
-        return self.get_host_stats(refresh=True)
-
     def get_host_stats(self, refresh=False):
         caps = []
         context = nova_context.get_admin_context()
