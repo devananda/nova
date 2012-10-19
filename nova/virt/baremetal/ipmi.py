@@ -30,6 +30,7 @@ from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.baremetal import baremetal_states
+from nova.virt.baremetal import utils as bm_utils
 
 opts = [
     cfg.StrOpt('baremetal_term',
@@ -62,13 +63,6 @@ def _make_password_file(password):
     with os.fdopen(fd, "w") as f:
         f.write(password)
     return path
-
-
-def _unlink_without_raise(path):
-    try:
-        os.unlink(path)
-    except OSError:
-        LOG.exception("failed to unlink %s" % path)
 
 
 class IpmiError(Exception):
@@ -110,7 +104,7 @@ class Ipmi(object):
             args.extend(command.split(" "))
             out, err = utils.execute(*args, attempts=3)
         finally:
-            _unlink_without_raise(pwfile)
+            bm_utils.unlink_without_raise(pwfile)
         LOG.debug("out: %s", out)
         LOG.debug("err: %s", err)
         return out, err
@@ -213,7 +207,7 @@ class Ipmi(object):
             utils.execute('kill', str(console_pid),
                           run_as_root=True,
                           check_exit_code=False)
-        _unlink_without_raise(self._console_pidfile(node_id))
+        bm_utils.unlink_without_raise(self._console_pidfile(node_id))
 
     def _console_pidfile(self, node_id):
         name = "%s.pid" % node_id

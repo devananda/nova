@@ -25,14 +25,13 @@ import shutil
 import subprocess
 import time
 
-from nova.compute import instance_types
 from nova import exception
 from nova import flags
 from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova import utils
+from nova.virt.baremetal import utils as bm_utils
 from nova.virt.disk import api as disk
-from nova.virt.libvirt import utils as libvirt_utils
 
 
 LOG = logging.getLogger(__name__)
@@ -60,12 +59,6 @@ def _late_load_cheetah():
         t = __import__('Cheetah.Template', globals(), locals(),
                        ['Template'], -1)
         Template = t.Template
-
-
-def _cache_image_x(context, target, image_id, user_id, project_id):
-    if not os.path.exists(target):
-        libvirt_utils.fetch_image(context, target, image_id,
-                                  user_id, project_id)
 
 
 class TILERA(object):
@@ -97,17 +90,9 @@ class TILERA(object):
             key = str(inst['key_data'])
         else:
             key = None
-        net = ""
+
         nets = []
-        ifc_template = open(FLAGS.baremetal_injected_network_template).read()
-        ifc_num = -1
-        have_injected_networks = False
-        for (network_ref, mapping) in network_info:
-            ifc_num += 1
-            # always inject
-            #if not network_ref['injected']:
-            #    continue
-            have_injected_networks = True
+        for (ifc_num, (network_ref, mapping)) in enumerate(network_info):
             address = mapping['ips'][0]['ip']
             netmask = mapping['ips'][0]['netmask']
             address_v6 = None
@@ -130,11 +115,12 @@ class TILERA(object):
                    'hwaddress': mapping['mac']}
             nets.append(net_info)
 
-        if have_injected_networks:
-            _late_load_cheetah()
-            net = str(Template(ifc_template,
-                               searchList=[{'interfaces': nets,
-                                            'use_ipv6': FLAGS.use_ipv6}]))
+        ifc_template = open(FLAGS.baremetal_injected_network_template).read()
+        _late_load_cheetah()
+        net = str(Template(ifc_template,
+                           searchList=[{'interfaces': nets,
+                                        'use_ipv6': FLAGS.use_ipv6,
+                                        }]))
         bootif_name = "eth0"
         net += "\n"
         net += "auto %s\n" % bootif_name
@@ -176,11 +162,11 @@ class TILERA(object):
         image_path = os.path.join(image_root, 'disk')
         LOG.debug("fetching image id=%s target=%s", ami_id, image_path)
 
-        _cache_image_x(context=context,
-                           target=image_path,
-                           image_id=ami_id,
-                           user_id=instance['user_id'],
-                           project_id=instance['project_id'])
+        bm_utils.cache_image(context=context,
+                             target=image_path,
+                             image_id=ami_id,
+                             user_id=instance['user_id'],
+                             project_id=instance['project_id'])
         LOG.debug("injecting to image id=%s target=%s", ami_id, image_path)
         self._inject_to_image(context, image_path, node, instance,
                               network_info,
@@ -202,17 +188,6 @@ class TILERA(object):
         utils.execute('mv', disk_path, image_path, run_as_root=True)
         utils.execute('mount', '-o', 'loop', image_path, target_path,
                       run_as_root=True)
-
-        root_mb = instance['root_gb'] * 1024
-
-        inst_type_id = instance['instance_type_id']
-        inst_type = instance_types.get_instance_type(inst_type_id)
-        swap_mb = inst_type['swap']
-        if swap_mb < 1024:
-            swap_mb = 1024
-
-        iscsi_iqn = "iqn-%s" % str(instance['uuid'])
-        iscsi_portal = None
 
     def deactivate_bootloader(self, var, context, node, instance):
         tftp_root = var['tftp_root']

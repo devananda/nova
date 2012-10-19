@@ -30,6 +30,7 @@ from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.baremetal import db as bmdb
+from nova.virt.baremetal import utils as bm_utils
 from nova.virt.baremetal import vlan
 from nova.virt.disk import api as disk
 from nova.virt.libvirt import utils as libvirt_utils
@@ -105,13 +106,6 @@ def _dnsmasq_pid(pxe_interface):
     return None
 
 
-def _unlink_without_raise(path):
-    try:
-        libvirt_utils.file_delete(path)
-    except OSError:
-        LOG.exception("failed to unlink %s" % path)
-
-
 def _random_alnum(count):
     import random
     import string
@@ -132,13 +126,6 @@ def _start_dnsmasq(interface, tftp_root, client_address, pid_path, lease_path):
                   '--dhcp-boot=pxelinux.0',
                   '--dhcp-range=%s,%s' % (client_address, client_address),
                   run_as_root=True)
-
-
-def _cache_image_x(context, target, image_id,
-                   user_id, project_id):
-    if not os.path.exists(target):
-        libvirt_utils.fetch_image(context, target, image_id,
-                                  user_id, project_id)
 
 
 def _build_pxe_config(deployment_id, deployment_key, deployment_iscsi_iqn,
@@ -220,8 +207,8 @@ def _stop_per_host_pxe_server(tftp_root, vlan_id):
     dnsmasq_pid = _dnsmasq_pid(pxe_interface)
     if dnsmasq_pid:
         utils.execute('kill', '-TERM', str(dnsmasq_pid), run_as_root=True)
-    _unlink_without_raise(_dnsmasq_pid_path(pxe_interface))
-    _unlink_without_raise(_dnsmasq_lease_path(pxe_interface))
+    bm_utils.unlink_without_raise(_dnsmasq_pid_path(pxe_interface))
+    bm_utils.unlink_without_raise(_dnsmasq_lease_path(pxe_interface))
 
     vlan.ensure_no_vlan(vlan_id, FLAGS.baremetal_pxe_parent_interface)
 
@@ -365,11 +352,11 @@ class PXE(object):
         image_path = os.path.join(image_root, 'disk')
         LOG.debug("fetching image id=%s target=%s", ami_id, image_path)
 
-        _cache_image_x(context=context,
-                       target=image_path,
-                       image_id=ami_id,
-                       user_id=instance['user_id'],
-                       project_id=instance['project_id'])
+        bm_utils.cache_image(context=context,
+                             target=image_path,
+                             image_id=ami_id,
+                             user_id=instance['user_id'],
+                             project_id=instance['project_id'])
 
         LOG.debug("injecting to image id=%s target=%s", ami_id, image_path)
         self._inject_to_image(context, image_path, node,
@@ -396,6 +383,7 @@ class PXE(object):
         aki_id = str(instance['kernel_id'])
         ari_id = str(instance['ramdisk_id'])
 
+        # (image_id, filename_in_tftp)
         images = [(deploy_aki_id, 'deploy_kernel'),
                   (deploy_ari_id, 'deploy_ramdisk'),
                   (aki_id, 'kernel'),
@@ -413,17 +401,17 @@ class PXE(object):
 
         LOG.debug("tftp_paths=%s", tftp_paths)
 
-        def _cache_image_b(image_id, target):
+        def cache_image(image_id, target):
             LOG.debug("fetching id=%s target=%s", image_id, target)
-            _cache_image_x(context=context,
-                           image_id=image_id,
-                           target=target,
-                           user_id=instance['user_id'],
-                           project_id=instance['project_id'])
+            bm_utils.cache_image(context=context,
+                                 image_id=image_id,
+                                 target=target,
+                                 user_id=instance['user_id'],
+                                 project_id=instance['project_id'])
 
         for image, path in zip(images, tftp_paths):
             target = os.path.join(tftp_root, path)
-            _cache_image_b(image[0], target)
+            cache_image(image[0], target)
 
         pxe_config_dir = os.path.join(tftp_root, 'pxelinux.cfg')
         pxe_config_path = os.path.join(pxe_config_dir,
@@ -483,7 +471,7 @@ class PXE(object):
         pxe_config_path = os.path.join(tftp_root,
                                        "pxelinux.cfg",
                                        self._pxe_cfg_name(node))
-        _unlink_without_raise(pxe_config_path)
+        bm_utils.unlink_without_raise(pxe_config_path)
 
     def activate_node(self, var, context, node, instance):
         pass

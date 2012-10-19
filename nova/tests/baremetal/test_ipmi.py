@@ -30,6 +30,7 @@ from nova import utils as nova_utils
 from nova.tests.baremetal.db import utils
 from nova.virt.baremetal import baremetal_states
 from nova.virt.baremetal import ipmi
+from nova.virt.baremetal import utils as bm_utils
 
 FLAGS = flags.FLAGS
 
@@ -81,7 +82,7 @@ class BareMetalIPMITestCase(test.TestCase):
 
         self.mox.StubOutWithMock(ipmi, '_make_password_file')
         self.mox.StubOutWithMock(nova_utils, 'execute')
-        self.mox.StubOutWithMock(ipmi, '_unlink_without_raise')
+        self.mox.StubOutWithMock(bm_utils, 'unlink_without_raise')
         ipmi._make_password_file(P).AndReturn(F)
         args = [
                 'ipmitool',
@@ -92,7 +93,7 @@ class BareMetalIPMITestCase(test.TestCase):
                 'A', 'B', 'C',
                 ]
         nova_utils.execute(*args, attempts=3).AndReturn(('', ''))
-        ipmi._unlink_without_raise(F).AndReturn(None)
+        bm_utils.unlink_without_raise(F).AndReturn(None)
         self.mox.ReplayAll()
 
         i = ipmi.Ipmi(n1)
