@@ -459,14 +459,6 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
         self.assertIn('host_memory_free', host_status)
 
     @catch_notimplementederror
-    def test_update_host_status(self):
-        host_status = self.connection.update_host_status()
-        if not isinstance(host_status, list):
-            host_status = [host_status]
-        for hs in host_status:
-            self._check_host_status_fields(hs)
-
-    @catch_notimplementederror
     def test_get_host_stats(self):
         host_status = self.connection.get_host_stats()
         self._check_host_status_fields(host_status)
