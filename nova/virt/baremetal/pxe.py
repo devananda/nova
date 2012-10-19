@@ -256,8 +256,8 @@ class PXE(object):
         pifs = bmdb.bm_interface_get_all_by_bm_node_id(context, node['id'])
         for pif in pifs:
             nics_in_order.append(pif['address'])
-        nics_in_order.append(node['prov_mac_address'])
         bootif_name = "eth%d" % len(nics_in_order)
+        nics_in_order.append(node['prov_mac_address'])
 
         # rename nics to be in the order in the DB
         LOG.debug("injecting persistent net")
