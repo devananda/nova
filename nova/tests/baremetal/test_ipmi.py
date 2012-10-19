@@ -99,8 +99,9 @@ class BareMetalIPMITestCase(test.TestCase):
         i._exec_ipmitool('A B C')
         self.mox.VerifyAll()
 
+
 class BareMetalIPMIRetryTestCase(test.TestCase):
-    
+
     def setUp(self):
         super(BareMetalIPMIRetryTestCase, self).setUp()
         self.retry = 10
@@ -138,4 +139,3 @@ class BareMetalIPMIRetryTestCase(test.TestCase):
         self.mox.ReplayAll()
         ret = self.ipmi._power_off()
         self.assertEqual(baremetal_states.ERROR, ret)
-

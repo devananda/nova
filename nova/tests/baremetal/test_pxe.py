@@ -29,7 +29,7 @@ FLAGS = flags.FLAGS
 
 
 class BaremetalPXETestCase(test.TestCase):
-    
+
     def test_random_alnum(self):
         s = pxe._random_alnum(10)
         self.assertEqual(len(s), 10)

@@ -305,8 +305,8 @@ class PXE(object):
                 netmask_v6 = mapping['ip6s'][0]['netmask']
                 gateway_v6 = mapping['gateway_v6']
             name = 'eth%d' % ifc_num
-            if (FLAGS.baremetal_use_unsafe_vlan 
-                    and mapping['should_create_vlan'] 
+            if (FLAGS.baremetal_use_unsafe_vlan
+                    and mapping['should_create_vlan']
                     and network_ref.get('vlan')):
                 name = 'eth%d.%d' % (ifc_num, network_ref.get('vlan'))
             net_info = {'name': name,
