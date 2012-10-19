@@ -257,6 +257,7 @@ class PXE(object):
         for pif in pifs:
             nics_in_order.append(pif['address'])
         nics_in_order.append(node['prov_mac_address'])
+        bootif_name = "eth%d" % len(nics_in_order)
 
         # rename nics to be in the order in the DB
         LOG.debug("injecting persistent net")
@@ -270,7 +271,6 @@ class PXE(object):
             injected_files = []
         injected_files.append(('/etc/udev/rules.d/70-persistent-net.rules',
                                rules))
-        bootif_name = "eth%d" % (i + 1)
 
         if inst['key_data']:
             key = str(inst['key_data'])
