@@ -110,7 +110,7 @@ def _random_alnum(count):
     import random
     import string
     chars = string.ascii_uppercase + string.digits
-    return "".join((random.choice(chars) for _ in range(count)))
+    return "".join(random.choice(chars) for _ in range(count))
 
 
 def _start_dnsmasq(interface, tftp_root, client_address, pid_path, lease_path):
