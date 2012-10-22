@@ -230,6 +230,26 @@ class ComputeTestCase(BaseTestCase):
 
         self.assertTrue(called['fault_added'])
 
+    def test_wrap_instance_fault_instance_in_args(self):
+        inst = {"uuid": "fake_uuid"}
+
+        called = {'fault_added': False}
+
+        def did_it_add_fault(*args):
+            called['fault_added'] = True
+
+        self.stubs.Set(compute_utils, 'add_instance_fault_from_exc',
+                       did_it_add_fault)
+
+        @compute_manager.wrap_instance_fault
+        def failer(self2, context, instance):
+            raise NotImplementedError()
+
+        self.assertRaises(NotImplementedError, failer,
+                          self.compute, self.context, inst)
+
+        self.assertTrue(called['fault_added'])
+
     def test_wrap_instance_fault_no_instance(self):
         inst_uuid = "fake_uuid"
 
@@ -630,6 +650,9 @@ class ComputeTestCase(BaseTestCase):
         instances = db.instance_get_all(context.get_admin_context())
         LOG.info(_("After terminating instances: %s"), instances)
         self.assertEqual(len(instances), 0)
+        bdms = db.block_device_mapping_get_all_by_instance(self.context,
+                                                           instance['uuid'])
+        self.assertEqual(len(bdms), 0)
 
     def test_terminate_no_network(self):
         # This is as reported in LP bug 1008875
