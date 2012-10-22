@@ -236,8 +236,7 @@ class BareMetalDriver(driver.ComputeDriver):
             mountpoint = vol['mount_device']
             self.attach_volume(connection_info, instance['name'], mountpoint)
 
-        if node['terminal_port']:
-            pm.start_console(node['terminal_port'])
+        pm.start_console()
 
     def reboot(self, instance, network_info, reboot_type,
                block_device_info=None):

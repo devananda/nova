@@ -77,7 +77,7 @@ class FakePowerManager(object):
     def is_power_on(self):
         return True
 
-    def start_console(self, port):
+    def start_console(self):
         pass
 
     def stop_console(self):

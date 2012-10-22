@@ -110,6 +110,7 @@ class Ipmi(object):
         self._user = node['pm_user']
         self._password = node['pm_password']
         self._interface = "lanplus"
+        self._terminal_port = node['terminal_port']
         if self._address == None:
             raise IpmiError(-1, "address is None")
         if self._user == None:
@@ -175,7 +176,9 @@ class Ipmi(object):
     def is_power_on(self):
         return self._is_power("on")
 
-    def start_console(self, port):
+    def start_console(self):
+        if not self._terminal_port:
+            return
         args = []
         args.append(FLAGS.baremetal_term)
         if FLAGS.baremetal_term_cert_dir:
@@ -184,7 +187,7 @@ class Ipmi(object):
         else:
             args.append("-t")
         args.append("-p")
-        args.append(str(port))
+        args.append(str(self._terminal_port))
         args.append("--background=%s" % _console_pidfile(self._node_id))
         args.append("-s")
 
@@ -206,7 +209,7 @@ class Ipmi(object):
         x.append('</dev/null')
         x.append('>/dev/null')
         x.append('2>&1')
-        return utils.execute(' '.join(x), shell=True)
+        utils.execute(' '.join(x), shell=True)
 
     def stop_console(self):
         _stop_console(self._node_id)

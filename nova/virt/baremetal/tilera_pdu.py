@@ -128,7 +128,7 @@ class Pdu(object):
         r = self._exec_status()
         return (r == -1)
 
-    def start_console(self, port):
+    def start_console(self):
         pass
 
     def stop_console(self):
