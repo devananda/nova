@@ -100,7 +100,7 @@ class BaseTestCase(test.TestCase):
         # override tracker with a version that doesn't need the database:
         fake_rt = fake_resource_tracker.FakeResourceTracker(self.compute.host,
                     self.compute.driver)
-        self.compute._set_resource_tracker(fake_rt)
+        self.compute._resource_tracker_dict[None] = fake_rt
         self.compute.update_available_resource(
                 context.get_admin_context())
 
@@ -204,7 +204,7 @@ class ComputeTestCase(BaseTestCase):
                        fake_get_nw_info)
         self.compute_api = compute.API()
         # Just to make long lines short
-        self.rt = self.compute._get_resource_tracker()
+        self.rt = self.compute._get_resource_tracker(nodename=None)
 
     def tearDown(self):
         super(ComputeTestCase, self).tearDown()
