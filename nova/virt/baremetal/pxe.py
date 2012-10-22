@@ -242,7 +242,7 @@ class PXE(object):
         var['network_info'] = network_info
         var['block_device_info'] = block_device_info
         return var
-    
+
     def _collect_mac_addresses(self, context, node):
         macs = [nic['address']
                 for nic in bmdb.bm_interface_get_all_by_bm_node_id(
