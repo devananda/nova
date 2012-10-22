@@ -27,7 +27,7 @@ def get_baremetal_nodes():
     return Fake()
 
 
-class Fake:
+class Fake(object):
 
     def __init__(self):
         pass
@@ -77,8 +77,8 @@ class FakePowerManager(object):
     def is_power_on(self):
         return True
 
-    def start_console(self, port, node_id):
+    def start_console(self, port):
         pass
 
-    def stop_console(self, node_id):
+    def stop_console(self):
         pass

@@ -404,8 +404,9 @@ class PXE(object):
             cache_image(image_id, target)
             tftp_paths.append(tftp_path)
         return tftp_paths
-    
-    def _create_deployment(self, context, instance, image_path, pxe_config_path):
+
+    def _create_deployment(self, context, instance, image_path,
+                           pxe_config_path):
         root_mb = instance['root_gb'] * 1024
 
         inst_type_id = instance['instance_type_id']
@@ -431,7 +432,7 @@ class PXE(object):
         pxe_config_dir = os.path.join(tftp_root, 'pxelinux.cfg')
         pxe_config_path = os.path.join(pxe_config_dir,
                                        self._pxe_cfg_name(node))
-        
+
         deployment = self._create_deployment(context, instance, image_path,
                                              pxe_config_path)
 

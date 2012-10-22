@@ -113,7 +113,6 @@ class Pdu(object):
         return baremetal_states.ACTIVE
 
     def _power_off(self):
-        count = 1
         try:
             self._power_mgr(2)
         except Exception:
@@ -129,8 +128,8 @@ class Pdu(object):
         r = self._exec_status()
         return (r == -1)
 
-    def start_console(self, port, node_id):
+    def start_console(self, port):
         pass
 
-    def stop_console(self, node_id):
+    def stop_console(self):
         pass

@@ -85,12 +85,12 @@ def _console_pid(node_id):
 
 
 def _stop_console(node_id):
-        console_pid = _console_pid(node_id)
-        if console_pid:
-            utils.execute('kill', str(console_pid),
-                          run_as_root=True,
-                          check_exit_code=False)
-        bm_utils.unlink_without_raise(_console_pidfile(node_id))
+    console_pid = _console_pid(node_id)
+    if console_pid:
+        utils.execute('kill', str(console_pid),
+                      run_as_root=True,
+                      check_exit_code=False)
+    bm_utils.unlink_without_raise(_console_pidfile(node_id))
 
 
 class IpmiError(Exception):
@@ -188,15 +188,12 @@ class Ipmi(object):
         args.append("--background=%s" % _console_pidfile(self._node_id))
         args.append("-s")
 
-        uid = os.getuid()
-        gid = os.getgid()
-
         pwfile = _make_password_file(self._password)
 
         ipmi_args = "/:%(uid)s:%(gid)s:HOME:ipmitool -H %(address)s" \
                     " -I lanplus -U %(user)s -f %(pwfile)s sol activate" \
-                    % {'uid': str(uid),
-                       'gid': str(gid),
+                    % {'uid': str(os.getuid()),
+                       'gid': str(os.getgid()),
                        'address': self._address,
                        'user': self._user,
                        'pwfile': pwfile,
@@ -212,4 +209,4 @@ class Ipmi(object):
         return utils.execute(' '.join(x), shell=True)
 
     def stop_console(self):
-        _stop_console(self.node_id)
+        _stop_console(self._node_id)

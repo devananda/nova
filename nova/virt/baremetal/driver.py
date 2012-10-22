@@ -237,7 +237,7 @@ class BareMetalDriver(driver.ComputeDriver):
             self.attach_volume(connection_info, instance['name'], mountpoint)
 
         if node['terminal_port']:
-            pm.start_console(node['terminal_port'], node['id'])
+            pm.start_console(node['terminal_port'])
 
     def reboot(self, instance, network_info, reboot_type,
                block_device_info=None):
@@ -266,7 +266,7 @@ class BareMetalDriver(driver.ComputeDriver):
 
         pm = get_power_manager(node)
 
-        pm.stop_console(node['id'])
+        pm.stop_console()
 
         ## power off the node
         state = pm.deactivate_node()
