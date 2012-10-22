@@ -31,112 +31,128 @@ from nova.tests.baremetal.db import utils
 from nova.virt.baremetal import baremetal_states
 from nova.virt.baremetal import ipmi
 from nova.virt.baremetal import utils as bm_utils
+from nova.virt.libvirt import utils as libvirt_utils
 
 FLAGS = flags.FLAGS
 
 
 class BareMetalIPMITestCase(test.TestCase):
 
-    def test_ipmi(self):
-        n1 = utils.new_bm_node(
-                pm_address='10.1.1.1',
-                pm_user='n1_user',
-                pm_password='n1_password')
-        pm1 = ipmi.Ipmi(n1)
-        self.assertEqual(pm1._address, '10.1.1.1')
-        self.assertEqual(pm1._user, 'n1_user')
-        self.assertEqual(pm1._password, 'n1_password')
+    def setUp(self):
+        super(BareMetalIPMITestCase, self).setUp()
+        self.node = utils.new_bm_node(
+                id=123,
+                pm_address='fake-address',
+                pm_user='fake-user',
+                pm_password='fake-password')
+        self.ipmi = ipmi.Ipmi(self.node)
 
-        n2 = utils.new_bm_node(
-                pm_address='10.2.2.2',
-                pm_user='n2_user',
-                pm_password='n2_password')
-        pm2 = ipmi.Ipmi(n2)
-        self.assertEqual(pm2._address, '10.2.2.2')
-        self.assertEqual(pm2._user, 'n2_user')
-        self.assertEqual(pm2._password, 'n2_password')
+    def test_construct(self):
+        self.assertEqual(self.ipmi._node_id, 123)
+        self.assertEqual(self.ipmi._address, 'fake-address')
+        self.assertEqual(self.ipmi._user, 'fake-user')
+        self.assertEqual(self.ipmi._password, 'fake-password')
 
     def test_make_password_file(self):
-        PASSWORD = 'xyz'
-        path = ipmi._make_password_file(PASSWORD)
-        self.assertTrue(os.path.isfile(path))
-        self.assertEqual(os.stat(path)[stat.ST_MODE] & 0777, 0600)
+        path = ipmi._make_password_file(self.node['pm_password'])
         try:
+            self.assertTrue(os.path.isfile(path))
+            self.assertEqual(os.stat(path)[stat.ST_MODE] & 0777, 0600)
             with open(path, "r") as f:
                 s = f.read()
-            self.assertEqual(s, PASSWORD)
+            self.assertEqual(s, self.node['pm_password'])
         finally:
             os.unlink(path)
 
     def test_exec_ipmitool(self):
-        H = 'address'
-        U = 'user'
-        P = 'password'
-        I = 'lanplus'
-        F = 'password_file'
-
-        n1 = utils.new_bm_node(
-                pm_address=H,
-                pm_user=U,
-                pm_password=P)
+        pwfile = '/tmp/password_file'
 
         self.mox.StubOutWithMock(ipmi, '_make_password_file')
         self.mox.StubOutWithMock(nova_utils, 'execute')
         self.mox.StubOutWithMock(bm_utils, 'unlink_without_raise')
-        ipmi._make_password_file(P).AndReturn(F)
+        ipmi._make_password_file(self.ipmi._password).AndReturn(pwfile)
         args = [
                 'ipmitool',
-                '-I', I,
-                '-H', H,
-                '-U', U,
-                '-f', F,
+                '-I', 'lanplus',
+                '-H', self.ipmi._address,
+                '-U', self.ipmi._user,
+                '-f', pwfile,
                 'A', 'B', 'C',
                 ]
         nova_utils.execute(*args, attempts=3).AndReturn(('', ''))
-        bm_utils.unlink_without_raise(F).AndReturn(None)
+        bm_utils.unlink_without_raise(pwfile).AndReturn(None)
         self.mox.ReplayAll()
 
-        i = ipmi.Ipmi(n1)
+        i = ipmi.Ipmi(self.node)
         i._exec_ipmitool('A B C')
         self.mox.VerifyAll()
 
-
-class BareMetalIPMIRetryTestCase(test.TestCase):
-
-    def setUp(self):
-        super(BareMetalIPMIRetryTestCase, self).setUp()
-        self.retry = 10
-        self.wait = 60
-        self.flags(baremetal_ipmi_power_retry=self.retry,
-                   baremetal_ipmi_power_wait=self.wait)
-        n = utils.new_bm_node(
-                pm_address='fake-address',
-                pm_user='fake-user',
-                pm_password='fake-password')
-        self.ipmi = ipmi.Ipmi(n)
-
     def test_power_on(self):
-        self.mox.StubOutWithMock(self.ipmi, 'is_power_on')
+        retry = 10
+        wait = 60
+        self.flags(baremetal_ipmi_power_retry=retry,
+                   baremetal_ipmi_power_wait=wait)
+
+        self.mox.StubOutWithMock(self.ipmi, '_is_power')
         self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
         self.mox.StubOutWithMock(time, 'sleep')
-        for _ in range(self.retry):
-            self.ipmi.is_power_on().AndReturn(False)
+        for _ in range(retry):
+            self.ipmi._is_power("on").AndReturn(False)
             self.ipmi._exec_ipmitool("power on")
-            time.sleep(self.wait)
-        self.ipmi.is_power_on().AndReturn(False)
+            time.sleep(wait)
+        self.ipmi._is_power("on").AndReturn(False)
         self.mox.ReplayAll()
-        ret = self.ipmi._power_on()
+        ret = self.ipmi._power("on")
         self.assertEqual(baremetal_states.ERROR, ret)
 
     def test_power_off(self):
-        self.mox.StubOutWithMock(self.ipmi, '_is_power_off')
+        retry = 10
+        wait = 60
+        self.flags(baremetal_ipmi_power_retry=retry,
+                   baremetal_ipmi_power_wait=wait)
+
+        self.mox.StubOutWithMock(self.ipmi, '_is_power')
         self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
         self.mox.StubOutWithMock(time, 'sleep')
-        for _ in range(self.retry):
-            self.ipmi._is_power_off().AndReturn(False)
+        for _ in range(retry):
+            self.ipmi._is_power("off").AndReturn(False)
             self.ipmi._exec_ipmitool("power off")
-            time.sleep(self.wait)
-        self.ipmi._is_power_off().AndReturn(False)
+            time.sleep(wait)
+        self.ipmi._is_power("off").AndReturn(False)
         self.mox.ReplayAll()
-        ret = self.ipmi._power_off()
+        ret = self.ipmi._power("off")
         self.assertEqual(baremetal_states.ERROR, ret)
+
+    def test_console_pid(self):
+        pidfile = ipmi._console_pidfile(self.node['id'])
+
+        self.mox.StubOutWithMock(os.path, 'exists')
+        self.mox.StubOutWithMock(libvirt_utils, 'load_file')
+        os.path.exists(pidfile).AndReturn(True)
+        libvirt_utils.load_file(pidfile).AndReturn('12345')
+        self.mox.ReplayAll()
+
+        pid = ipmi._console_pid(self.node['id'])
+        self.assertEqual(pid, 12345)
+
+    def test_console_pid_nan(self):
+        pidfile = ipmi._console_pidfile(self.node['id'])
+
+        self.mox.StubOutWithMock(os.path, 'exists')
+        self.mox.StubOutWithMock(libvirt_utils, 'load_file')
+        os.path.exists(pidfile).AndReturn(True)
+        libvirt_utils.load_file(pidfile).AndReturn('***')
+        self.mox.ReplayAll()
+
+        pid = ipmi._console_pid(self.node['id'])
+        self.assertTrue(pid is None)
+
+    def test_console_pid_file_not_found(self):
+        pidfile = ipmi._console_pidfile(self.node['id'])
+
+        self.mox.StubOutWithMock(os.path, 'exists')
+        os.path.exists(pidfile).AndReturn(False)
+        self.mox.ReplayAll()
+
+        pid = ipmi._console_pid(self.node['id'])
+        self.assertTrue(pid is None)

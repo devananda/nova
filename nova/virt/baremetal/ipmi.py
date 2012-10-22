@@ -31,6 +31,7 @@ from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.baremetal import baremetal_states
 from nova.virt.baremetal import utils as bm_utils
+from nova.virt.libvirt import utils as libvirt_utils
 
 opts = [
     cfg.StrOpt('baremetal_term',
@@ -65,6 +66,33 @@ def _make_password_file(password):
     return path
 
 
+def _console_pidfile(node_id):
+    name = "%s.pid" % node_id
+    path = os.path.join(FLAGS.baremetal_term_pid_dir, name)
+    return path
+
+
+def _console_pid(node_id):
+    pidfile = _console_pidfile(node_id)
+    if os.path.exists(pidfile):
+        pidstr = libvirt_utils.load_file(pidfile)
+        try:
+            return int(pidstr)
+        except ValueError:
+            pass
+        LOG.warn("pidfile %s does not contain any pid", pidfile)
+    return None
+
+
+def _stop_console(node_id):
+        console_pid = _console_pid(node_id)
+        if console_pid:
+            utils.execute('kill', str(console_pid),
+                          run_as_root=True,
+                          check_exit_code=False)
+        bm_utils.unlink_without_raise(_console_pidfile(node_id))
+
+
 class IpmiError(Exception):
     def __init__(self, status, message):
         self.status = status
@@ -77,6 +105,7 @@ class IpmiError(Exception):
 class Ipmi(object):
 
     def __init__(self, node):
+        self._node_id = node['id']
         self._address = node['pm_address']
         self._user = node['pm_user']
         self._password = node['pm_password']
@@ -109,78 +138,54 @@ class Ipmi(object):
         LOG.debug("err: %s", err)
         return out, err
 
+    def _power(self, state):
+        count = 0
+        while not self._is_power(state):
+            count += 1
+            if count > FLAGS.baremetal_ipmi_power_retry:
+                return baremetal_states.ERROR
+            try:
+                self._exec_ipmitool("power %s" % state)
+            except Exception:
+                LOG.exception("_power(%s) failed" % state)
+            time.sleep(FLAGS.baremetal_ipmi_power_wait)
+        if state == "on":
+            return baremetal_states.ACTIVE
+        else:
+            return baremetal_states.DELETED
+
+    def _is_power(self, state):
+        out_err = self._exec_ipmitool("power status")
+        return out_err[0] == ("Chassis Power is %s\n" % state)
+
     def activate_node(self):
-        self._power_off()
-        state = self._power_on()
+        self._power("off")
+        state = self._power("on")
         return state
 
     def reboot_node(self):
-        self._power_off()
-        state = self._power_on()
+        self._power("off")
+        state = self._power_on("on")
         return state
 
     def deactivate_node(self):
-        state = self._power_off()
+        state = self._power("off")
         return state
 
-    def _power_on(self):
-        count = 0
-        while not self.is_power_on():
-            count += 1
-            if count > FLAGS.baremetal_ipmi_power_retry:
-                return baremetal_states.ERROR
-            try:
-                self._exec_ipmitool("power on")
-            except Exception:
-                LOG.exception("power_on failed")
-            time.sleep(FLAGS.baremetal_ipmi_power_wait)
-        return baremetal_states.ACTIVE
-
-    def _power_off(self):
-        count = 0
-        while not self._is_power_off():
-            count += 1
-            if count > FLAGS.baremetal_ipmi_power_retry:
-                return baremetal_states.ERROR
-            try:
-                self._exec_ipmitool("power off")
-            except Exception:
-                LOG.exception("power_off failed")
-            time.sleep(FLAGS.baremetal_ipmi_power_wait)
-        return baremetal_states.DELETED
-
-    def _power_status(self):
-        out_err = self._exec_ipmitool("power status")
-        return out_err[0]
-
-    def _is_power_off(self):
-        r = self._power_status()
-        return r == "Chassis Power is off\n"
-
     def is_power_on(self):
-        r = self._power_status()
-        return r == "Chassis Power is on\n"
+        return self._is_power("on")
 
-    def start_console(self, port, node_id):
-        pidfile = self._console_pidfile(node_id)
-
-        TERMINAL = FLAGS.baremetal_term
-        CERTDIR = FLAGS.baremetal_term_cert_dir
-
+    def start_console(self, port):
         args = []
-
-        args.append(TERMINAL)
-        if CERTDIR:
+        args.append(FLAGS.baremetal_term)
+        if FLAGS.baremetal_term_cert_dir:
             args.append("-c")
-            args.append(CERTDIR)
+            args.append(FLAGS.baremetal_term_cert_dir)
         else:
             args.append("-t")
         args.append("-p")
         args.append(str(port))
-        if pidfile:
-            args.append("--background=%s" % pidfile)
-        else:
-            args.append("--background")
+        args.append("--background=%s" % _console_pidfile(self._node_id))
         args.append("-s")
 
         uid = os.getuid()
@@ -188,9 +193,14 @@ class Ipmi(object):
 
         pwfile = _make_password_file(self._password)
 
-        ipmi_args = "/:%s:%s:HOME:ipmitool -H %s -I lanplus " \
-                    " -U %s -f %s sol activate" \
-                    % (str(uid), str(gid), self._address, self._user, pwfile)
+        ipmi_args = "/:%(uid)s:%(gid)s:HOME:ipmitool -H %(address)s" \
+                    " -I lanplus -U %(user)s -f %(pwfile)s sol activate" \
+                    % {'uid': str(uid),
+                       'gid': str(gid),
+                       'address': self._address,
+                       'user': self._user,
+                       'pwfile': pwfile,
+                       }
 
         args.append(ipmi_args)
         # Run shellinaboxd without pipes. Otherwise utils.execute() waits
@@ -201,22 +211,5 @@ class Ipmi(object):
         x.append('2>&1')
         return utils.execute(' '.join(x), shell=True)
 
-    def stop_console(self, node_id):
-        console_pid = self._console_pid(node_id)
-        if console_pid:
-            utils.execute('kill', str(console_pid),
-                          run_as_root=True,
-                          check_exit_code=False)
-        bm_utils.unlink_without_raise(self._console_pidfile(node_id))
-
-    def _console_pidfile(self, node_id):
-        name = "%s.pid" % node_id
-        path = os.path.join(FLAGS.baremetal_term_pid_dir, name)
-        return path
-
-    def _console_pid(self, node_id):
-        pidfile = self._console_pidfile(node_id)
-        if os.path.exists(pidfile):
-            with open(pidfile, 'r') as f:
-                return int(f.read())
-        return None
+    def stop_console(self):
+        _stop_console(self.node_id)
