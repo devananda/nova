@@ -242,8 +242,25 @@ class PXE(object):
         var['network_info'] = network_info
         var['block_device_info'] = block_device_info
         return var
+    
+    def _collect_mac_addresses(self, context, node):
+        macs = [nic['address']
+                for nic in bmdb.bm_interface_get_all_by_bm_node_id(
+                        context, node['id'])]
+        return macs
 
-    def _generate_network_config(self, network_info):
+    def _generate_persistent_net_rules(self, macs):
+        rules = ''
+        for (i, mac) in enumerate(macs):
+            rules += 'SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ' \
+                     'ATTR{address}=="%(mac)s", ATTR{dev_id}=="0x0", ' \
+                     'ATTR{type}=="1", KERNEL=="eth*", NAME="%(name)s"\n' \
+                     % {'mac': mac.lower(),
+                        'name': 'eth%d' % i,
+                        }
+        return rules
+
+    def _generate_network_config(self, network_info, bootif_name):
         nets = []
         for (ifc_num, (network_ref, mapping)) in enumerate(network_info):
             address = mapping['ips'][0]['ip']
@@ -279,10 +296,15 @@ class PXE(object):
                            searchList=[{'interfaces': nets,
                                         'use_ipv6': FLAGS.use_ipv6,
                                         }]))
+        net += '\n'
+        net += 'auto %s\n' % bootif_name
+        net += 'iface %s inet dhcp\n' % bootif_name
         return net
 
     def _inject_to_image(self, context, target, node, inst, network_info,
                          injected_files=None, admin_password=None):
+        if injected_files is None:
+            injected_files = []
         # For now, we assume that if we're not using a kernel, we're using a
         # partitioned disk image where the target partition is the first
         # partition
@@ -290,35 +312,20 @@ class PXE(object):
         if not inst['kernel_id']:
             target_partition = "1"
 
-        nics_in_order = []
-        pifs = bmdb.bm_interface_get_all_by_bm_node_id(context, node['id'])
-        for pif in pifs:
-            nics_in_order.append(pif['address'])
-        bootif_name = "eth%d" % len(nics_in_order)
-        nics_in_order.append(node['prov_mac_address'])
+        # udev renames the nics so that they are in the same order as in BMDB
+        macs = self._collect_mac_addresses(context, node)
+        bootif_name = "eth%d" % len(macs)
+        macs.append(node['prov_mac_address'])
+        rules = self._generate_persistent_net_rules(macs)
+        injected_files.append(
+                ('/etc/udev/rules.d/70-persistent-net.rules', rules))
 
-        # rename nics to be in the order in the DB
-        LOG.debug("injecting persistent net")
-        rules = ""
-        for (i, hwaddr) in enumerate(nics_in_order):
-            rules += 'SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ' \
-                     'ATTR{address}=="%s", ATTR{dev_id}=="0x0", ' \
-                     'ATTR{type}=="1", KERNEL=="eth*", NAME="eth%d"\n' \
-                     % (hwaddr.lower(), i)
-        if not injected_files:
-            injected_files = []
-        injected_files.append(('/etc/udev/rules.d/70-persistent-net.rules',
-                               rules))
+        net = self._generate_network_config(network_info, bootif_name)
 
         if inst['key_data']:
             key = str(inst['key_data'])
         else:
             key = None
-
-        net = self._generate_network_config(network_info)
-        net += "\n"
-        net += "auto %s\n" % bootif_name
-        net += "iface %s inet dhcp\n" % bootif_name
 
         if not FLAGS.baremetal_inject_password:
             admin_password = None
