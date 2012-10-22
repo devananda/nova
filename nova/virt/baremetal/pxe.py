@@ -404,6 +404,22 @@ class PXE(object):
             cache_image(image_id, target)
             tftp_paths.append(tftp_path)
         return tftp_paths
+    
+    def _create_deployment(self, context, instance, image_path, pxe_config_path):
+        root_mb = instance['root_gb'] * 1024
+
+        inst_type_id = instance['instance_type_id']
+        inst_type = instance_types.get_instance_type(inst_type_id)
+        swap_mb = inst_type['swap']
+        if swap_mb < 1024:
+            swap_mb = 1024
+
+        deployment_key = _random_alnum(32)
+        deployment_id = bmdb.bm_deployment_create(context, deployment_key,
+                                                  image_path, pxe_config_path,
+                                                  root_mb, swap_mb)
+        deployment = bmdb.bm_deployment_get(context, deployment_id)
+        return deployment
 
     def activate_bootloader(self, var, context, node, instance):
         tftp_root = var['tftp_root']
@@ -415,31 +431,22 @@ class PXE(object):
         pxe_config_dir = os.path.join(tftp_root, 'pxelinux.cfg')
         pxe_config_path = os.path.join(pxe_config_dir,
                                        self._pxe_cfg_name(node))
-
-        root_mb = instance['root_gb'] * 1024
-
-        inst_type_id = instance['instance_type_id']
-        inst_type = instance_types.get_instance_type(inst_type_id)
-        swap_mb = inst_type['swap']
-        if swap_mb < 1024:
-            swap_mb = 1024
+        
+        deployment = self._create_deployment(context, instance, image_path,
+                                             pxe_config_path)
 
         pxe_ip = None
         if FLAGS.baremetal_pxe_vlan_per_host:
             pxe_ip_id = bmdb.bm_pxe_ip_associate(context, node['id'])
             pxe_ip = bmdb.bm_pxe_ip_get(context, pxe_ip_id)
 
-        deployment_key = _random_alnum(32)
-        deployment_id = bmdb.bm_deployment_create(context, deployment_key,
-                                                  image_path, pxe_config_path,
-                                                  root_mb, swap_mb)
-        deployment_iscsi_iqn = "iqn-%s" % str(instance['uuid'])
+        deployment_iscsi_iqn = "iqn-%s" % instance['uuid']
         iscsi_portal = None
         if FLAGS.baremetal_pxe_append_iscsi_portal:
             if pxe_ip:
                 iscsi_portal = pxe_ip['server_address']
-        pxeconf = _build_pxe_config(deployment_id,
-                                    deployment_key,
+        pxeconf = _build_pxe_config(deployment['id'],
+                                    deployment['key'],
                                     deployment_iscsi_iqn,
                                     deployment_aki_path=tftp_paths[0],
                                     deployment_ari_path=tftp_paths[1],
