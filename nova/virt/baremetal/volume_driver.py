@@ -141,6 +141,38 @@ def _list_backingstore_path():
     return l
 
 
+def _get_next_tid():
+    import re
+    out, _ = utils.execute('tgtadm', '--lld', 'iscsi',
+                           '--mode', 'target',
+                           '--op', 'show',
+                           run_as_root=True)
+    last_tid = 0
+    for line in out.split('\n'):
+        m = re.search(r'^Target ([0-9])+:', line)
+        if m:
+            tid = int(m.group(1))
+            if last_tid < tid:
+                last_tid = tid
+    if last_tid is None:
+        last_tid = 0
+    return last_tid + 1
+
+
+def _find_tid(iqn):
+    import re
+    out, _ = utils.execute('tgtadm', '--lld', 'iscsi',
+                           '--mode', 'target',
+                           '--op', 'show',
+                           run_as_root=True)
+    pattern = r'^Target ([0-9])+: *' + re.escape(iqn)
+    for line in out.split('\n'):
+        m = re.search(pattern, line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 class VolumeDriver(object):
 
     def __init__(self):
@@ -205,10 +237,9 @@ class LibvirtVolumeDriver(VolumeDriver):
                                           mount_device)
         LOG.debug("conf=%s", conf)
         device_path = connection_info['data']['device_path']
-        volume_id = connection_info['data']['volume_id']
-        tid = volume_id + FLAGS.baremetal_iscsi_tid_offset
         mpstr = mountpoint.replace('/', '.').strip('.')
-        iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix, tid, mpstr)
+        iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix, instance_name, mpstr)
+        tid = _get_next_tid()
         _create_iscsi_export_tgtadm(device_path, tid, iqn)
         if pxe_ip:
             _allow_iscsi_tgtadm(tid, pxe_ip['address'])
@@ -221,9 +252,13 @@ class LibvirtVolumeDriver(VolumeDriver):
     def detach_volume(self, connection_info, instance_name, mountpoint):
         mount_device = mountpoint.rpartition("/")[2]
         try:
-            volume_id = connection_info['data']['volume_id']
-            tid = volume_id + FLAGS.baremetal_iscsi_tid_offset
-            _delete_iscsi_export_tgtadm(tid)
+            mpstr = mountpoint.replace('/', '.').strip('.')
+            iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix, instance_name, mpstr)
+            tid = _find_tid(iqn)
+            if tid is not None:
+                _delete_iscsi_export_tgtadm(tid)
+            else:
+                LOG.warn("tid for %s not found", iqn)
         finally:
             self._volume_driver_method('disconnect_volume',
                                        connection_info,
