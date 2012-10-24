@@ -258,6 +258,10 @@ def _get_eph_disk(ephemeral):
 
 class LibvirtDriver(driver.ComputeDriver):
 
+    capabilities = {
+        "has_imagecache": True,
+        }
+
     def __init__(self, read_only=False):
         super(LibvirtDriver, self).__init__()
 
@@ -830,8 +834,10 @@ class LibvirtDriver(driver.ComputeDriver):
         (state, _max_mem, _mem, _cpus, _t) = virt_dom.info()
         state = LIBVIRT_POWER_STATE[state]
 
-        if state == power_state.RUNNING:
-            virt_dom.managedSave(0)
+        # NOTE(dkang): managedSave does not work for LXC
+        if FLAGS.libvirt_type != 'lxc':
+            if state == power_state.RUNNING:
+                virt_dom.managedSave(0)
 
         # Make the snapshot
         snapshot = self.image_backend.snapshot(disk_path, snapshot_name,
@@ -848,8 +854,11 @@ class LibvirtDriver(driver.ComputeDriver):
                 snapshot.extract(out_path, image_format)
             finally:
                 snapshot.delete()
-                if state == power_state.RUNNING:
-                    self._create_domain(domain=virt_dom)
+                # NOTE(dkang): because previous managedSave is not called
+                #              for LXC, _create_domain must not be called.
+                if FLAGS.libvirt_type != 'lxc':
+                    if state == power_state.RUNNING:
+                        self._create_domain(domain=virt_dom)
 
             # Upload that image to the image service
             with libvirt_utils.file_open(out_path) as image_file:
@@ -1213,7 +1222,7 @@ class LibvirtDriver(driver.ComputeDriver):
         libvirt_utils.create_image('raw', target,
                                    '%d%c' % (local_size, unit))
         if fs_format:
-            libvirt_utils.mkfs(fs_format, target, label)
+            utils.mkfs(fs_format, target, label)
 
     def _create_ephemeral(self, target, ephemeral_size, fs_label, os_type):
         self._create_local(target, ephemeral_size)
@@ -1223,7 +1232,7 @@ class LibvirtDriver(driver.ComputeDriver):
     def _create_swap(target, swap_mb):
         """Create a swap file of specified size"""
         libvirt_utils.create_image('raw', target, '%dM' % swap_mb)
-        libvirt_utils.mkfs('swap', target)
+        utils.mkfs('swap', target)
 
     @staticmethod
     def _get_console_log_path(instance_name):

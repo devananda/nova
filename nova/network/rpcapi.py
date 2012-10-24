@@ -33,6 +33,7 @@ class NetworkAPI(rpc_proxy.RpcProxy):
     API version history:
 
         1.0 - Initial version.
+        1.1 - Adds migrate_instance_[start|finish]
     '''
 
     #
@@ -208,14 +209,6 @@ class NetworkAPI(rpc_proxy.RpcProxy):
         return self.call(ctxt, self.make_msg('setup_networks_on_host',
                 instance_id=instance_id, host=host, teardown=teardown))
 
-    def lease_fixed_ip(self, ctxt, host, address):
-        self.cast(ctxt, self.make_msg('lease_fixed_ip', address=address),
-                topic=rpc.queue_get_for(ctxt, self.topic, host))
-
-    def release_fixed_ip(self, ctxt, host, address):
-        self.cast(ctxt, self.make_msg('release_fixed_ip', address=address),
-                topic=rpc.queue_get_for(ctxt, self.topic, host))
-
     def set_network_host(self, ctxt, network_ref):
         network_ref_p = jsonutils.to_primitive(network_ref)
         return self.call(ctxt, self.make_msg('set_network_host',
@@ -272,3 +265,18 @@ class NetworkAPI(rpc_proxy.RpcProxy):
         return self.cast(ctxt, self.make_msg('release_fixed_ip',
                 address=address),
                 topic=rpc.queue_get_for(ctxt, self.topic, host))
+
+    def migrate_instance_start(self, ctxt, instance_uuid,
+                               floating_addresses, host):
+        return self.call(ctxt, self.make_msg('migrate_instance_start',
+                                             instance_uuid=instance_uuid,
+                                    floating_addresses=floating_addresses),
+                         topic=rpc.queue_get_for(ctxt, self.topic, host))
+
+    def migrate_instance_finish(self, ctxt, instance_uuid,
+                                floating_addresses, dest):
+        return self.call(ctxt, self.make_msg('migrate_instance_finish',
+                                             instance_uuid=instance_uuid,
+                                    floating_addresses=floating_addresses,
+                                             host=dest),
+                         topic=rpc.queue_get_for(ctxt, self.topic, dest))

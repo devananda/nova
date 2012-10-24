@@ -499,7 +499,6 @@ class LazyPluggable(object):
                 fromlist = backend
 
             self.__backend = __import__(name, None, None, fromlist)
-            LOG.debug(_('backend %s'), self.__backend)
         return self.__backend
 
     def __getattr__(self, key):
@@ -1328,3 +1327,24 @@ def ensure_tree(path):
                 raise
         else:
             raise
+
+
+def mkfs(fs, path, label=None):
+    """Format a file or block device
+
+    :param fs: Filesystem type (examples include 'swap', 'ext3', 'ext4'
+               'btrfs', etc.)
+    :param path: Path to file or block device to format
+    :param label: Volume label to use
+    """
+    if fs == 'swap':
+        execute('mkswap', path)
+    else:
+        args = ['mkfs', '-t', fs]
+        #add -F to force no interactive excute on non-block device.
+        if fs in ['ext3', 'ext4']:
+            args.extend(['-F'])
+        if label:
+            args.extend(['-n', label])
+        args.append(path)
+        execute(*args)

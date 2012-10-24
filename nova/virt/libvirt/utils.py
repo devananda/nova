@@ -279,27 +279,6 @@ def copy_image(src, dest, host=None):
             execute('rsync', '--sparse', '--compress', src, dest)
 
 
-def mkfs(fs, path, label=None):
-    """Format a file or block device
-
-    :param fs: Filesystem type (examples include 'swap', 'ext3', 'ext4'
-               'btrfs', etc.)
-    :param path: Path to file or block device to format
-    :param label: Volume label to use
-    """
-    if fs == 'swap':
-        execute('mkswap', path)
-    else:
-        args = ['mkfs', '-t', fs]
-        #add -F to force no interactive excute on non-block device.
-        if fs in ['ext3', 'ext4']:
-            args.extend(['-F'])
-        if label:
-            args.extend(['-n', label])
-        args.append(path)
-        execute(*args)
-
-
 def write_to_file(path, contents, umask=None):
     """Write the given contents to a file
 
@@ -417,8 +396,14 @@ def find_disk(virt_dom):
     May be file or device"""
     xml_desc = virt_dom.XMLDesc(0)
     domain = etree.fromstring(xml_desc)
-    source = domain.find('devices/disk/source')
-    disk_path = source.get('file') or source.get('dev')
+    if FLAGS.libvirt_type == 'lxc':
+        source = domain.find('devices/filesystem/source')
+        disk_path = source.get('dir')
+        disk_path = disk_path[0:disk_path.rfind('rootfs')]
+        disk_path = os.path.join(disk_path, 'disk')
+    else:
+        source = domain.find('devices/disk/source')
+        disk_path = source.get('file') or source.get('dev')
 
     if not disk_path:
         raise RuntimeError(_("Can't retrieve root device path "
