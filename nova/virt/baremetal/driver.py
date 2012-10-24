@@ -137,6 +137,10 @@ def get_power_manager(node, **kwargs):
 class BareMetalDriver(driver.ComputeDriver):
     """BareMetal hypervisor driver."""
 
+    capabilities = {
+        "has_imagecache": True,
+        }
+
     def __init__(self, read_only=False):
         super(BareMetalDriver, self).__init__()
 
