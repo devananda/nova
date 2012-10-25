@@ -142,7 +142,7 @@ def _build_pxe_config(deployment_id, deployment_key, deployment_iscsi_iqn,
     pxeconf += "append"
     pxeconf += " initrd=%s" % deployment_ari_path
     pxeconf += " selinux=0"
-    pxeconf += " disk=cciss/c0d0,sda,hda"
+    pxeconf += " disk=cciss/c0d0,sda,hda,vda"
     pxeconf += " iscsi_target_iqn=%s" % deployment_iscsi_iqn
     pxeconf += " deployment_id=%s" % deployment_id
     pxeconf += " deployment_key=%s" % deployment_key
