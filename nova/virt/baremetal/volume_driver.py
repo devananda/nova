@@ -16,6 +16,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import re
+
 from nova import context as nova_context
 from nova import db
 from nova import exception
@@ -122,7 +124,6 @@ def _delete_iscsi_export_tgtadm(tid):
 
 
 def _list_backingstore_path():
-    import re
     out, _ = utils.execute('tgtadm', '--lld', 'iscsi',
                            '--mode', 'target',
                            '--op', 'show',
@@ -137,7 +138,6 @@ def _list_backingstore_path():
 
 
 def _get_next_tid():
-    import re
     out, _ = utils.execute('tgtadm', '--lld', 'iscsi',
                            '--mode', 'target',
                            '--op', 'show',
@@ -155,7 +155,6 @@ def _get_next_tid():
 
 
 def _find_tid(iqn):
-    import re
     out, _ = utils.execute('tgtadm', '--lld', 'iscsi',
                            '--mode', 'target',
                            '--op', 'show',
