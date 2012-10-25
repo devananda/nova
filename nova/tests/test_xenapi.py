@@ -176,18 +176,22 @@ class XenAPIVolumeTestCase(stubs.XenAPITestBase):
         return db.volume_create(self.context, vol)
 
     @staticmethod
-    def _make_info():
+    def _make_connection_data():
+        return {
+            'volume_id': 1,
+            'target_iqn': 'iqn.2010-10.org.openstack:volume-00000001',
+            'target_portal': '127.0.0.1:3260,fake',
+            'target_lun': None,
+            'auth_method': 'CHAP',
+            'auth_username': 'username',
+            'auth_password': 'password',
+        }
+
+    @classmethod
+    def _make_connection_info(cls):
         return {
             'driver_volume_type': 'iscsi',
-            'data': {
-                'volume_id': 1,
-                'target_iqn': 'iqn.2010-10.org.openstack:volume-00000001',
-                'target_portal': '127.0.0.1:3260,fake',
-                'target_lun': None,
-                'auth_method': 'CHAP',
-                'auth_method': 'fake',
-                'auth_method': 'fake',
-            }
+            'data': cls._make_connection_data()
         }
 
     def test_mountpoint_to_number(self):
@@ -211,18 +215,18 @@ class XenAPIVolumeTestCase(stubs.XenAPITestBase):
             self.assertEqual(actual, expected,
                     '%s yielded %s, not %s' % (input, actual, expected))
 
-    def test_parse_volume_info_raise_exception(self):
-        """This shows how to test helper classes' methods."""
-        stubs.stubout_session(self.stubs, stubs.FakeSessionForVolumeTests)
-        session = xenapi_conn.XenAPISession('test_url', 'root', 'test_pass')
-        vol = self._create_volume()
-        # oops, wrong mount point!
-        self.assertRaises(volume_utils.StorageError,
-                          volume_utils.parse_volume_info,
-                          self._make_info(),
-                          'dev/sd'
-                          )
-        db.volume_destroy(context.get_admin_context(), vol['id'])
+    def test_parse_volume_info_parsing_auth_details(self):
+        result = volume_utils.parse_volume_info(
+            self._make_connection_data())
+
+        self.assertEquals('username', result['chapuser'])
+        self.assertEquals('password', result['chappassword'])
+
+    def test_get_device_number_raise_exception_on_wrong_mountpoint(self):
+        self.assertRaises(
+            volume_utils.StorageError,
+            volume_utils.get_device_number,
+            'dev/sd')
 
     def test_attach_volume(self):
         """This shows how to test Ops classes' methods."""
@@ -231,7 +235,7 @@ class XenAPIVolumeTestCase(stubs.XenAPITestBase):
         volume = self._create_volume()
         instance = db.instance_create(self.context, self.instance_values)
         vm = xenapi_fake.create_vm(instance.name, 'Running')
-        result = conn.attach_volume(self._make_info(),
+        result = conn.attach_volume(self._make_connection_info(),
                                     instance.name, '/dev/sdc')
 
         # check that the VM has a VBD attached to it
@@ -358,7 +362,8 @@ class XenAPIVMTestCase(stubs.XenAPITestBase):
 
     def test_instance_snapshot_fails_with_no_primary_vdi(self):
         def create_bad_vbd(session, vm_ref, vdi_ref, userdevice,
-                           vbd_type='disk', read_only=False, bootable=False):
+                           vbd_type='disk', read_only=False, bootable=False,
+                           osvol=False):
             vbd_rec = {'VM': vm_ref,
                'VDI': vdi_ref,
                'userdevice': 'fake',
@@ -1331,7 +1336,8 @@ class XenAPIAutoDiskConfigTestCase(stubs.XenAPITestBase):
         self.context = context.RequestContext(self.user_id, self.project_id)
 
         def fake_create_vbd(session, vm_ref, vdi_ref, userdevice,
-                            vbd_type='disk', read_only=False, bootable=True):
+                            vbd_type='disk', read_only=False, bootable=True,
+                            osvol=False):
             pass
 
         self.stubs.Set(vm_utils, 'create_vbd', fake_create_vbd)
@@ -1423,7 +1429,8 @@ class XenAPIGenerateLocal(stubs.XenAPITestBase):
         self.context = context.RequestContext(self.user_id, self.project_id)
 
         def fake_create_vbd(session, vm_ref, vdi_ref, userdevice,
-                            vbd_type='disk', read_only=False, bootable=True):
+                            vbd_type='disk', read_only=False, bootable=True,
+                            osvol=False):
             pass
 
         self.stubs.Set(vm_utils, 'create_vbd', fake_create_vbd)

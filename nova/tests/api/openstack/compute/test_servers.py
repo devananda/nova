@@ -40,7 +40,7 @@ from nova.db.sqlalchemy import models
 from nova import exception
 from nova import flags
 from nova.network import manager
-from nova.network import quantumv2
+from nova.network.quantumv2 import api as quantum_api
 from nova.openstack.common import jsonutils
 from nova.openstack.common import rpc
 from nova import test
@@ -136,7 +136,7 @@ class Base64ValidationTest(test.TestCase):
         self.assertEqual(result, None)
 
 
-class QuantumV2Subclass(quantumv2.api.API):
+class QuantumV2Subclass(quantum_api.API):
     """Used to ensure that API handles subclasses properly."""
     pass
 
@@ -811,9 +811,10 @@ class ServersControllerTest(test.TestCase):
 
     def test_get_servers_invalid_status(self):
         """Test getting servers by invalid status"""
-        req = fakes.HTTPRequest.blank('/v2/fake/servers?status=unknown',
+        req = fakes.HTTPRequest.blank('/v2/fake/servers?status=baloney',
                                       use_admin_context=False)
-        self.assertRaises(webob.exc.HTTPBadRequest, self.controller.index, req)
+        servers = self.controller.index(req)['servers']
+        self.assertEqual(len(servers), 0)
 
     def test_get_servers_deleted_status_as_user(self):
         req = fakes.HTTPRequest.blank('/v2/fake/servers?status=deleted',
@@ -2094,6 +2095,29 @@ class ServersControllerCreateTest(test.TestCase):
 
         def create(*args, **kwargs):
             self.assertEqual(kwargs['block_device_mapping'], None)
+            return old_create(*args, **kwargs)
+
+        self.stubs.Set(compute_api.API, 'create', create)
+        self._test_create_extra(params)
+
+    def test_create_instance_with_bdm_delete_on_termination(self):
+        self.ext_mgr.extensions = {'os-volumes': 'fake'}
+        bdm = [{'device_name': 'foo1', 'delete_on_termination': 1},
+               {'device_name': 'foo2', 'delete_on_termination': True},
+               {'device_name': 'foo3', 'delete_on_termination': 'invalid'},
+               {'device_name': 'foo4', 'delete_on_termination': 0},
+               {'device_name': 'foo5', 'delete_on_termination': False}]
+        expected_dbm = [
+            {'device_name': 'foo1', 'delete_on_termination': True},
+            {'device_name': 'foo2', 'delete_on_termination': True},
+            {'device_name': 'foo3', 'delete_on_termination': False},
+            {'device_name': 'foo4', 'delete_on_termination': False},
+            {'device_name': 'foo5', 'delete_on_termination': False}]
+        params = {'block_device_mapping': bdm}
+        old_create = compute_api.API.create
+
+        def create(*args, **kwargs):
+            self.assertEqual(kwargs['block_device_mapping'], expected_dbm)
             return old_create(*args, **kwargs)
 
         self.stubs.Set(compute_api.API, 'create', create)

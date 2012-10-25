@@ -47,6 +47,7 @@ from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.disk import api as disk
 from nova.virt import driver
+from nova.virt.xenapi import agent
 from nova.virt.xenapi import volume_utils
 
 
@@ -353,7 +354,7 @@ def destroy_vbd(session, vbd_ref):
 
 
 def create_vbd(session, vm_ref, vdi_ref, userdevice, vbd_type='disk',
-               read_only=False, bootable=False):
+               read_only=False, bootable=False, osvol=False):
     """Create a VBD record and returns its reference."""
     vbd_rec = {}
     vbd_rec['VM'] = vm_ref
@@ -373,6 +374,11 @@ def create_vbd(session, vm_ref, vdi_ref, userdevice, vbd_type='disk',
     vbd_ref = session.call_xenapi('VBD.create', vbd_rec)
     LOG.debug(_('Created VBD %(vbd_ref)s for VM %(vm_ref)s,'
                 ' VDI %(vdi_ref)s.'), locals())
+    if osvol:
+        # set osvol=True in other-config to indicate this is an
+        # attached nova (or cinder) volume
+        session.call_xenapi("VBD.add_to_other_config",
+                                  vbd_ref, 'osvol', "True")
     return vbd_ref
 
 
@@ -420,15 +426,37 @@ def create_vdi(session, sr_ref, instance, name_label, disk_type, virtual_size,
     return vdi_ref
 
 
-def get_vdis_for_boot_from_vol(session, instance, dev_params):
+def get_vdis_for_boot_from_vol(session, dev_params):
     vdis = {}
     sr_uuid = dev_params['sr_uuid']
     sr_ref = volume_utils.find_sr_by_uuid(session,
                                           sr_uuid)
-    if sr_ref:
+    # Try introducing SR if it is not present
+    if not sr_ref:
+        if 'name_label' not in dev_params:
+            label = 'tempSR-%s' % dev_params['volume_id']
+        else:
+            label = dev_params['name_label']
+
+        if 'name_description' not in dev_params:
+            desc = ''
+        else:
+            desc = dev_params.get('name_description')
+        sr_params = {}
+        for k in dev_params['introduce_sr_keys']:
+            sr_params[k] = dev_params[k]
+
+        sr_params['name_description'] = desc
+        sr_ref = volume_utils.introduce_sr(session, sr_uuid, label,
+                                           sr_params)
+
+    if sr_ref is None:
+        raise exception.NovaException(_('SR not present and could not be '
+                                        'introduced'))
+    else:
         session.call_xenapi("SR.scan", sr_ref)
         return {'root': dict(uuid=dev_params['vdi_uuid'],
-                                file=None)}
+                file=None, osvol=True)}
     return vdis
 
 
@@ -462,7 +490,6 @@ def get_vdis_for_instance(context, session, instance, name_label, image,
             dev_params = bdm_root_dev['connection_info']['data']
             LOG.debug(dev_params)
             return get_vdis_for_boot_from_vol(session,
-                                             instance,
                                              dev_params)
     return _create_image(context, session, instance, name_label, image,
                         image_type)
@@ -2041,35 +2068,6 @@ def _mount_filesystem(dev_path, dir):
     return err
 
 
-def _find_guest_agent(base_dir, agent_rel_path):
-    """
-    tries to locate a guest agent at the path
-    specificed by agent_rel_path
-    """
-    agent_path = os.path.join(base_dir, agent_rel_path)
-    if os.path.isfile(agent_path):
-        # The presence of the guest agent
-        # file indicates that this instance can
-        # reconfigure the network from xenstore data,
-        # so manipulation of files in /etc is not
-        # required
-        LOG.info(_('XenServer tools installed in this '
-                   'image are capable of network injection.  '
-                   'Networking files will not be'
-                   'manipulated'))
-        return True
-    xe_daemon_filename = os.path.join(base_dir,
-        'usr', 'sbin', 'xe-daemon')
-    if os.path.isfile(xe_daemon_filename):
-        LOG.info(_('XenServer tools are present '
-                   'in this image but are not capable '
-                   'of network injection'))
-    else:
-        LOG.info(_('XenServer tools are not '
-                   'installed in this image'))
-    return False
-
-
 def _mounted_processing(device, key, net, metadata):
     """Callback which runs with the image VDI attached"""
     # NB: Partition 1 hardcoded
@@ -2080,7 +2078,7 @@ def _mounted_processing(device, key, net, metadata):
         if not err:
             try:
                 # This try block ensures that the umount occurs
-                if not _find_guest_agent(tmpdir, FLAGS.xenapi_agent_path):
+                if not agent.find_guest_agent(tmpdir):
                     LOG.info(_('Manipulating interface files directly'))
                     # for xenapi, we don't 'inject' admin_password here,
                     # it's handled at instance startup time, nor do we

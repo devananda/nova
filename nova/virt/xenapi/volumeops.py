@@ -118,29 +118,30 @@ class VolumeOps(object):
         if driver_type not in ['iscsi', 'xensm']:
             raise exception.VolumeDriverNotFound(driver_type=driver_type)
 
-        data = connection_info['data']
-        if 'name_label' not in data:
-            label = 'tempSR-%s' % data['volume_id']
-        else:
-            label = data['name_label']
-            del data['name_label']
+        connection_data = connection_info['data']
+        dev_number = volume_utils.get_device_number(mountpoint)
 
-        if 'name_description' not in data:
+        if 'name_label' not in connection_data:
+            label = 'tempSR-%s' % connection_data['volume_id']
+        else:
+            label = connection_data['name_label']
+            del connection_data['name_label']
+
+        if 'name_description' not in connection_data:
             desc = 'Disk-for:%s' % instance_name
         else:
-            desc = data['name_description']
+            desc = connection_data['name_description']
 
         LOG.debug(connection_info)
         sr_params = {}
-        if u'sr_uuid' not in data:
-            sr_params = volume_utils.parse_volume_info(connection_info,
-                                                       mountpoint)
+        if u'sr_uuid' not in connection_data:
+            sr_params = volume_utils.parse_volume_info(connection_data)
             uuid = "FA15E-D15C-" + str(sr_params['id'])
             sr_params['sr_type'] = 'iscsi'
         else:
-            uuid = data['sr_uuid']
-            for k in data['introduce_sr_keys']:
-                sr_params[k] = data[k]
+            uuid = connection_data['sr_uuid']
+            for k in connection_data['introduce_sr_keys']:
+                sr_params[k] = connection_data[k]
 
         sr_params['name_description'] = desc
 
@@ -155,10 +156,10 @@ class VolumeOps(object):
 
         vdi_uuid = None
         target_lun = None
-        if 'vdi_uuid' in data:
-            vdi_uuid = data['vdi_uuid']
-        elif 'target_lun' in data:
-            target_lun = data['target_lun']
+        if 'vdi_uuid' in connection_data:
+            vdi_uuid = connection_data['vdi_uuid']
+        elif 'target_lun' in connection_data:
+            target_lun = connection_data['target_lun']
         else:
             vdi_uuid = None
 
@@ -172,10 +173,10 @@ class VolumeOps(object):
             raise Exception(_('Unable to create VDI on SR %(sr_ref)s for'
                     ' instance %(instance_name)s') % locals())
 
-        dev_number = volume_utils.mountpoint_to_number(mountpoint)
         try:
             vbd_ref = vm_utils.create_vbd(self._session, vm_ref, vdi_ref,
-                                          dev_number, bootable=False)
+                                          dev_number, bootable=False,
+                                          osvol=True)
         except self._session.XenAPI.Failure, exc:
             LOG.exception(exc)
             self.forget_sr(uuid)
@@ -184,10 +185,6 @@ class VolumeOps(object):
 
         try:
             self._session.call_xenapi("VBD.plug", vbd_ref)
-            # set osvol=True in other-config to indicate this is an
-            # attached nova (or cinder) volume
-            self._session.call_xenapi("VBD.add_to_other_config",
-                                      vbd_ref, 'osvol', "True")
         except self._session.XenAPI.Failure, exc:
             LOG.exception(exc)
             self.forget_sr(uuid)

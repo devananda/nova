@@ -275,7 +275,15 @@ def purge_sr(session, sr_ref):
     forget_sr(session, sr_rec['uuid'])
 
 
-def parse_volume_info(connection_info, mountpoint):
+def get_device_number(mountpoint):
+    device_number = mountpoint_to_number(mountpoint)
+    if device_number < 0:
+        raise StorageError(_('Unable to obtain target information'
+                ' %(mountpoint)s') % locals())
+    return device_number
+
+
+def parse_volume_info(connection_data):
     """
     Parse device_path and mountpoint as they can be used by XenAPI.
     In particular, the mountpoint (e.g. /dev/sdc) must be translated
@@ -288,30 +296,27 @@ def parse_volume_info(connection_info, mountpoint):
     db in the iscsi_target table with the necessary info and modify
     the iscsi driver to set them.
     """
-    device_number = mountpoint_to_number(mountpoint)
-    data = connection_info['data']
-    volume_id = data['volume_id']
-    target_portal = data['target_portal']
+    volume_id = connection_data['volume_id']
+    target_portal = connection_data['target_portal']
     target_host = _get_target_host(target_portal)
     target_port = _get_target_port(target_portal)
-    target_iqn = data['target_iqn']
+    target_iqn = connection_data['target_iqn']
     LOG.debug('(vol_id,number,host,port,iqn): (%s,%s,%s,%s)',
               volume_id, target_host, target_port, target_iqn)
-    if (device_number < 0 or
-        volume_id is None or
+    if (volume_id is None or
         target_host is None or
         target_iqn is None):
         raise StorageError(_('Unable to obtain target information'
-                ' %(data)s, %(mountpoint)s') % locals())
+                ' %(connection_data)s') % locals())
     volume_info = {}
     volume_info['id'] = volume_id
     volume_info['target'] = target_host
     volume_info['port'] = target_port
     volume_info['targetIQN'] = target_iqn
-    if ('auth_method' in connection_info and
-        connection_info['auth_method'] == 'CHAP'):
-        volume_info['chapuser'] = connection_info['auth_username']
-        volume_info['chappassword'] = connection_info['auth_password']
+    if ('auth_method' in connection_data and
+        connection_data['auth_method'] == 'CHAP'):
+        volume_info['chapuser'] = connection_data['auth_username']
+        volume_info['chappassword'] = connection_data['auth_password']
 
     return volume_info
 

@@ -165,12 +165,6 @@ libvirt_opts = [
                 default=True,
                 help='Use a separated OS thread pool to realize non-blocking'
                      ' libvirt calls'),
-    # force_config_drive is a string option, to allow for future behaviors
-    #  (e.g. use config_drive based on image properties)
-    cfg.StrOpt('force_config_drive',
-               default=None,
-               help='Set to force injection to take place on a config drive '
-                    '(if set, valid options are: always)'),
     cfg.StrOpt('libvirt_cpu_mode',
                default=None,
                help='Set to "host-model" to clone the host CPU feature flags; '
@@ -652,7 +646,13 @@ class LibvirtDriver(driver.ComputeDriver):
             self._conn.defineXML(domxml)
         else:
             try:
-                flags = (libvirt.VIR_DOMAIN_AFFECT_CURRENT)
+                # NOTE(vish): We can always affect config because our
+                #             domains are persistent, but we should only
+                #             affect live if the domain is running.
+                flags = libvirt.VIR_DOMAIN_AFFECT_CONFIG
+                state = LIBVIRT_POWER_STATE[virt_dom.info()[0]]
+                if state == power_state.RUNNING:
+                    flags |= libvirt.VIR_DOMAIN_AFFECT_LIVE
                 virt_dom.attachDeviceFlags(conf.to_xml(), flags)
             except Exception, ex:
                 if isinstance(ex, libvirt.libvirtError):
@@ -710,7 +710,13 @@ class LibvirtDriver(driver.ComputeDriver):
                 domxml = virt_dom.XMLDesc(libvirt.VIR_DOMAIN_XML_SECURE)
                 self._conn.defineXML(domxml)
             else:
-                flags = (libvirt.VIR_DOMAIN_AFFECT_CURRENT)
+                # NOTE(vish): We can always affect config because our
+                #             domains are persistent, but we should only
+                #             affect live if the domain is running.
+                flags = libvirt.VIR_DOMAIN_AFFECT_CONFIG
+                state = LIBVIRT_POWER_STATE[virt_dom.info()[0]]
+                if state == power_state.RUNNING:
+                    flags |= libvirt.VIR_DOMAIN_AFFECT_LIVE
                 virt_dom.detachDeviceFlags(xml, flags)
         except libvirt.libvirtError as ex:
             # NOTE(vish): This is called to cleanup volumes after live
@@ -1250,13 +1256,6 @@ class LibvirtDriver(driver.ComputeDriver):
         if not suffix:
             suffix = ''
 
-        # Are we using a config drive?
-        using_config_drive = False
-        if (instance.get('config_drive') or
-            FLAGS.force_config_drive):
-            LOG.info(_('Using config drive'), instance=instance)
-            using_config_drive = True
-
         # syntactic nicety
         def basepath(fname='', suffix=suffix):
             return os.path.join(FLAGS.instances_path,
@@ -1398,7 +1397,8 @@ class LibvirtDriver(driver.ComputeDriver):
         net = netutils.get_injected_network_template(network_info)
 
         # Config drive
-        if using_config_drive:
+        if configdrive.required_by(instance):
+            LOG.info(_('Using config drive'), instance=instance)
             extra_md = {}
             if admin_pass:
                 extra_md['admin_pass'] = admin_pass
@@ -1657,9 +1657,7 @@ class LibvirtDriver(driver.ComputeDriver):
                                                     mount_device)
                     devices.append(cfg)
 
-            if (instance.get('config_drive') or
-                instance.get('config_drive_id') or
-                FLAGS.force_config_drive):
+            if configdrive.enabled_for(instance):
                 diskconfig = config.LibvirtConfigGuestDisk()
                 diskconfig.source_type = "file"
                 diskconfig.driver_format = "raw"
@@ -2767,9 +2765,9 @@ class LibvirtDriver(driver.ComputeDriver):
         out, err = utils.execute('env', 'LANG=C', 'uptime')
         return out
 
-    def manage_image_cache(self, context):
+    def manage_image_cache(self, context, all_instances):
         """Manage the local cache of images."""
-        self.image_cache_manager.verify_base_images(context)
+        self.image_cache_manager.verify_base_images(context, all_instances)
 
     def _cleanup_remote_migration(self, dest, inst_base, inst_base_resize):
         """Used only for cleanup in case migrate_disk_and_power_off fails"""

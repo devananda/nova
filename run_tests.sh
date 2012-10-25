@@ -100,7 +100,7 @@ function run_tests {
     fi
   else
     tests_run=$(awk '/^Ran/ {print $2}' nosetests.log)
-    if [ "$tests_run" -eq 0 ];
+    if [ -z "$tests_run" ] || [ "$tests_run" -eq 0 ];
     then
         echo "ERROR: Zero tests ran, something is wrong!"
         echo "This is usually caused by a parse error in some python"
@@ -128,7 +128,7 @@ function run_pep8 {
   srcfiles+=" setup.py"
 
   # Until all these issues get fixed, ignore.
-  ignore='--ignore=N4,E12,E711,E712,E721,E502'
+  ignore='--ignore=N4,E12,E711,E721'
 
   ${wrapper} python tools/hacking.py ${ignore} ${srcfiles}
 

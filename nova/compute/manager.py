@@ -225,6 +225,10 @@ class ComputeManager(manager.SchedulerDependentManager):
         if not compute_driver:
             compute_driver = FLAGS.compute_driver
 
+        if not compute_driver:
+            LOG.error(_("Compute driver option required, but not specified"))
+            sys.exit(1)
+
         LOG.info(_("Loading compute driver '%s'") % compute_driver)
         try:
             self.driver = utils.check_isinstance(
@@ -348,6 +352,9 @@ class ComputeManager(manager.SchedulerDependentManager):
         finally:
             if FLAGS.defer_iptables_apply:
                 self.driver.filter_defer_apply_off()
+
+        self._report_driver_status(context)
+        self._publish_service_capabilities(context)
 
     def _get_power_state(self, context, instance):
         """Retrieve the power state for the given instance."""
@@ -2121,7 +2128,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         LOG.audit(_('Detach volume %(volume_id)s from mountpoint %(mp)s'),
                   locals(), context=context, instance=instance)
 
-        if instance['name'] not in self.driver.list_instances():
+        if not self.driver.instance_exists(instance['name']):
             LOG.warn(_('Detaching volume from unknown instance'),
                      context=context, instance=instance)
         connection_info = jsonutils.loads(bdm['connection_info'])
@@ -3021,7 +3028,5 @@ class ComputeManager(manager.SchedulerDependentManager):
         if FLAGS.image_cache_manager_interval == 0:
             return
 
-        try:
-            self.driver.manage_image_cache(context)
-        except NotImplementedError:
-            pass
+        all_instances = self.db.instance_get_all(context)
+        self.driver.manage_image_cache(context, all_instances)
