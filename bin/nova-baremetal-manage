@@ -133,7 +133,7 @@ class BareMetalNodeCommands(object):
           help='TCP port for terminal access')
     @args('--prov_mac_address', dest='prov_mac_address',
           metavar='<prov_mac_address>',
-          help='MAC address of provisioning interface ' \
+          help='MAC address of provisioning interface '
                'in the form of xx:xx:xx:xx:xx:xx')
     @args('--prov_vlan_id', dest='prov_vlan_id', metavar='<prov_vlan_id>',
           help='VLAN ID (optional)')
