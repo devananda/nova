@@ -149,8 +149,6 @@ def _get_next_tid():
             tid = int(m.group(1))
             if last_tid < tid:
                 last_tid = tid
-    if last_tid is None:
-        last_tid = 0
     return last_tid + 1
 
 
@@ -165,6 +163,14 @@ def _find_tid(iqn):
         if m:
             return int(m.group(1))
     return None
+
+
+def _get_iqn(instance_name, mountpoint):
+    mp = mountpoint.replace('/', '-').strip('-')
+    iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix,
+                        instance_name,
+                        mp)
+    return iqn
 
 
 class VolumeDriver(object):
@@ -231,8 +237,7 @@ class LibvirtVolumeDriver(VolumeDriver):
                                           mount_device)
         LOG.debug("conf=%s", conf)
         device_path = connection_info['data']['device_path']
-        mpstr = mountpoint.replace('/', '.').strip('.')
-        iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix, instance_name, mpstr)
+        iqn = _get_iqn(instance_name, mountpoint)
         tid = _get_next_tid()
         _create_iscsi_export_tgtadm(device_path, tid, iqn)
         if pxe_ip:
@@ -246,8 +251,7 @@ class LibvirtVolumeDriver(VolumeDriver):
     def detach_volume(self, connection_info, instance_name, mountpoint):
         mount_device = mountpoint.rpartition("/")[2]
         try:
-            mpstr = mountpoint.replace('/', '.').strip('.')
-            iqn = '%s:%s-%s' % (FLAGS.baremetal_iscsi_iqn_prefix, instance_name, mpstr)
+            iqn = _get_iqn(instance_name, mountpoint)
             tid = _find_tid(iqn)
             if tid is not None:
                 _delete_iscsi_export_tgtadm(tid)
