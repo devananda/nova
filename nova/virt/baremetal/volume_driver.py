@@ -33,11 +33,6 @@ opts = [
                  default=True,
                  help='If a node dose not have an fixed PXE IP address, '
                       'volumes are exported with globally opened ACL'),
-    cfg.IntOpt('baremetal_iscsi_tid_offset',
-               default=1000000,
-               help="offset for iSCSI TID. This offset prevents "
-                    "baremetal volume's TID from conflicting with "
-                    "nova-volume's one"),
     cfg.StrOpt('baremetal_iscsi_iqn_prefix',
                default='iqn.2010-10.org.openstack.baremetal',
                help='iSCSI IQN prefix used in baremetal volume connections.'),
