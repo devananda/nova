@@ -27,6 +27,7 @@ from nova import exception
 from nova import flags
 from nova.network import linux_net
 from nova.openstack.common import cfg
+from nova.openstack.common import fileutils
 from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.baremetal import db as bmdb
@@ -192,7 +193,7 @@ def _start_per_host_pxe_server(tftp_root, vlan_id,
 
     shutil.copyfile(FLAGS.baremetal_pxelinux_path,
                     os.path.join(tftp_root, 'pxelinux.0'))
-    utils.ensure_tree(os.path.join(tftp_root, 'pxelinux.cfg'))
+    fileutils.ensure_tree(os.path.join(tftp_root, 'pxelinux.cfg'))
 
     _start_dnsmasq(interface=pxe_interface,
                    tftp_root=tftp_root,
@@ -359,7 +360,7 @@ class PXE(object):
         network_info = var['network_info']
 
         ami_id = str(image_meta['id'])
-        utils.ensure_tree(image_root)
+        fileutils.ensure_tree(image_root)
         image_path = os.path.join(image_root, 'disk')
         LOG.debug("fetching image id=%s target=%s", ami_id, image_path)
 
@@ -401,12 +402,12 @@ class PXE(object):
                   (str(instance['ramdisk_id']), 'ramdisk'),
                   ]
 
-        utils.ensure_tree(tftp_root)
+        fileutils.ensure_tree(tftp_root)
         tftp_paths = []
         for image_id, tftp_path in images:
             if not FLAGS.baremetal_pxe_vlan_per_host:
                 tftp_path = os.path.join(instance['uuid'], tftp_path)
-                utils.ensure_tree(os.path.join(tftp_root, instance['uuid']))
+                fileutils.ensure_tree(os.path.join(tftp_root, instance['uuid']))
             target = os.path.join(tftp_root, tftp_path)
             cache_image(image_id, target)
             tftp_paths.append(tftp_path)
@@ -461,7 +462,7 @@ class PXE(object):
                                     aki_path=tftp_paths[2],
                                     ari_path=tftp_paths[3],
                                     iscsi_portal=iscsi_portal)
-        utils.ensure_tree(pxe_config_dir)
+        fileutils.ensure_tree(pxe_config_dir)
         libvirt_utils.write_to_file(pxe_config_path, pxeconf)
 
         if FLAGS.baremetal_pxe_vlan_per_host:

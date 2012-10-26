@@ -28,6 +28,7 @@ import time
 from nova import exception
 from nova import flags
 from nova.openstack.common import cfg
+from nova.openstack.common import fileutils
 from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.baremetal import utils as bm_utils
@@ -158,7 +159,7 @@ class TILERA(object):
         network_info = var['network_info']
 
         ami_id = str(image_meta['id'])
-        utils.ensure_tree(image_root)
+        fileutils.ensure_tree(image_root)
         image_path = os.path.join(image_root, 'disk')
         LOG.debug("fetching image id=%s target=%s", ami_id, image_path)
 
