@@ -420,8 +420,11 @@ class PXE(object):
         inst_type_id = instance['instance_type_id']
         inst_type = instance_types.get_instance_type(inst_type_id)
         swap_mb = inst_type['swap']
-        if swap_mb < 1024:
-            swap_mb = 1024
+        # Always create a swap partition for simpler code paths in the
+        # deployment side. Its up to the user to choose how big - use 1MB if
+        # they don't choose anything at all.
+        if swap_mb < 1:
+            swap_mb = 1
 
         deployment_key = _random_alnum(32)
         deployment_id = bmdb.bm_deployment_create(context, deployment_key,
