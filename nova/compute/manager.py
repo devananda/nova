@@ -64,6 +64,7 @@ from nova.openstack.common import cfg
 from nova.openstack.common import excutils
 from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
+from nova.openstack.common import lockutils
 from nova.openstack.common import log as logging
 from nova.openstack.common.notifier import api as notifier
 from nova.openstack.common import rpc
@@ -860,7 +861,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         if injected_files is None:
             injected_files = []
 
-        @utils.synchronized(instance['uuid'])
+        @lockutils.synchronized(instance['uuid'], 'nova-')
         def do_run_instance():
             self._run_instance(context, request_spec,
                     filter_properties, requested_networks, injected_files,
@@ -970,7 +971,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         if not bdms:
             bdms = self._get_instance_volume_bdms(context, instance["uuid"])
 
-        @utils.synchronized(instance['uuid'])
+        @lockutils.synchronized(instance['uuid'], 'nova-')
         def do_terminate_instance(instance, bdms):
             try:
                 self._delete_instance(context, instance, bdms)
@@ -2043,7 +2044,7 @@ class ComputeManager(manager.SchedulerDependentManager):
     @wrap_instance_fault
     def reserve_block_device_name(self, context, instance, device, volume_id):
 
-        @utils.synchronized(instance['uuid'])
+        @lockutils.synchronized(instance['uuid'], 'nova-')
         def do_reserve():
             result = compute_utils.get_device_name_for_instance(context,
                                                                 instance,
@@ -2237,6 +2238,13 @@ class ComputeManager(manager.SchedulerDependentManager):
         if not block_device_info['block_device_mapping']:
             LOG.info(_('Instance has no volume.'), instance=instance)
 
+        # assign the volume to host system
+        # needed by the lefthand volume driver and maybe others
+        connector = self.driver.get_volume_connector(instance)
+        for bdm in self._get_instance_volume_bdms(context, instance['uuid']):
+            volume = self.volume_api.get(context, bdm['volume_id'])
+            self.volume_api.initialize_connection(context, volume, connector)
+
         network_info = self._get_instance_nw_info(context, instance)
 
         # TODO(tr3buchet): figure out how on the earth this is necessary
@@ -2318,12 +2326,16 @@ class ComputeManager(manager.SchedulerDependentManager):
                  instance=instance_ref)
 
         # Detaching volumes.
+        connector = self.driver.get_volume_connector(instance_ref)
         for bdm in self._get_instance_volume_bdms(ctxt, instance_ref['uuid']):
             # NOTE(vish): We don't want to actually mark the volume
             #             detached, or delete the bdm, just remove the
             #             connection from this host.
-            self.remove_volume_connection(ctxt, bdm['volume_id'],
-                                          instance_ref)
+
+            # remove the volume connection without detaching from hypervisor
+            # because the instance is not running anymore on the current host
+            volume = self.volume_api.get(ctxt, bdm['volume_id'])
+            self.volume_api.terminate_connection(ctxt, volume, connector)
 
         # Releasing vlan.
         # (not necessary in current implementation?)

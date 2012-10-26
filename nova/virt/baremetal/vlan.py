@@ -16,6 +16,7 @@
 #    under the License.
 
 from nova import flags
+from nova.openstack.common import lockutils
 from nova.openstack.common import log as logging
 from nova import utils
 
@@ -42,7 +43,7 @@ def _device_exists(device):
     return not err
 
 
-@utils.synchronized('ensure_vlan', external=True)
+@lockutils.synchronized('ensure_vlan', 'nova-', external=True)
 def ensure_vlan(vlan_num, parent_interface, mac_address=None):
     """Create a vlan unless it already exists."""
     _execute('ip', 'link', 'set', parent_interface, 'up', run_as_root=True)
@@ -61,7 +62,7 @@ def ensure_vlan(vlan_num, parent_interface, mac_address=None):
     return vlan_interface
 
 
-@utils.synchronized('ensure_vlan', external=True)
+@lockutils.synchronized('ensure_vlan', 'nova-', external=True)
 def ensure_no_vlan(vlan_num, parent_interface):
     """Delete a vlan if it exists."""
     vlan_interface = 'vlan%s' % vlan_num

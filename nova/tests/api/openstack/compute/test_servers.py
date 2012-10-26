@@ -1314,7 +1314,7 @@ class ServersControllerTest(test.TestCase):
         req.method = 'POST'
         req.body = jsonutils.dumps(body)
         req.headers["content-type"] = "application/json"
-        self.assertRaises(webob.exc.HTTPBadRequest,
+        self.assertRaises(webob.exc.HTTPRequestEntityTooLarge,
             self.controller._action_rebuild, req, FAKE_UUID, body)
 
     def test_rebuild_instance_with_metadata_value_too_long(self):
@@ -1348,7 +1348,7 @@ class ServersControllerTest(test.TestCase):
         req.method = 'POST'
         req.body = jsonutils.dumps(body)
         req.headers["content-type"] = "application/json"
-        self.assertRaises(webob.exc.HTTPBadRequest,
+        self.assertRaises(webob.exc.HTTPRequestEntityTooLarge,
             self.controller._action_rebuild, req, FAKE_UUID, body)
 
     def test_rebuild_instance_fails_when_min_ram_too_small(self):
@@ -2565,7 +2565,7 @@ class ServersControllerCreateTest(test.TestCase):
         req.body = jsonutils.dumps(body)
         req.headers["content-type"] = "application/json"
 
-        self.assertRaises(webob.exc.HTTPBadRequest,
+        self.assertRaises(webob.exc.HTTPRequestEntityTooLarge,
                           self.controller.create, req, body)
 
     def test_create_instance_metadata_value_too_long(self):
@@ -2589,7 +2589,7 @@ class ServersControllerCreateTest(test.TestCase):
         req.body = jsonutils.dumps(body)
         req.headers["content-type"] = "application/json"
 
-        self.assertRaises(webob.exc.HTTPBadRequest,
+        self.assertRaises(webob.exc.HTTPRequestEntityTooLarge,
                           self.controller.create, req, body)
 
     def test_create_instance_metadata_key_blank(self):
@@ -3027,6 +3027,57 @@ class TestServerCreateRequestXMLDeserializer(test.TestCase):
                 "imageRef": "1",
                 "flavorRef": "2",
             },
+        }
+        self.assertEquals(request['body'], expected)
+
+    def test_request_with_alternate_namespace_prefix(self):
+        serial_request = """
+<ns2:server xmlns:ns2="http://docs.openstack.org/compute/api/v2"
+        name="new-server-test"
+        imageRef="1"
+        flavorRef="2">
+        <ns2:metadata><ns2:meta key="hello">world</ns2:meta></ns2:metadata>
+        </ns2:server>
+        """
+        request = self.deserializer.deserialize(serial_request)
+        expected = {
+            "server": {
+                "name": "new-server-test",
+                "imageRef": "1",
+                "flavorRef": "2",
+                'metadata': {"hello": "world"},
+                },
+            }
+        self.assertEquals(request['body'], expected)
+
+    def test_request_with_scheduler_hints_and_alternate_namespace_prefix(self):
+        serial_request = """
+<ns2:server xmlns:ns2="http://docs.openstack.org/compute/api/v2"
+     name="new-server-test"
+     imageRef="1"
+     flavorRef="2">
+     <ns2:metadata><ns2:meta key="hello">world</ns2:meta></ns2:metadata>
+     <os:scheduler_hints
+     xmlns:os="http://docs.openstack.org/compute/ext/scheduler-hints/api/v2">
+             <hypervisor>xen</hypervisor>
+             <near>eb999657-dd6b-464e-8713-95c532ac3b18</near>
+     </os:scheduler_hints>
+     </ns2:server>
+        """
+        request = self.deserializer.deserialize(serial_request)
+        expected = {
+            "server": {
+                'OS-SCH-HNT:scheduler_hints': {
+                    'hypervisor': ['xen'],
+                    'near': ['eb999657-dd6b-464e-8713-95c532ac3b18']
+                },
+                "name": "new-server-test",
+                "imageRef": "1",
+                "flavorRef": "2",
+                "metadata": {
+                    "hello": "world"
+                }
+            }
         }
         self.assertEquals(request['body'], expected)
 

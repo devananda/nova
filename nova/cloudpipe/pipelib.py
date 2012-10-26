@@ -33,6 +33,7 @@ from nova import db
 from nova import exception
 from nova import flags
 from nova.openstack.common import cfg
+from nova.openstack.common import fileutils
 from nova.openstack.common import log as logging
 from nova import utils
 
@@ -52,6 +53,7 @@ cloudpipe_opts = [
                help=_('Netmask to push into openvpn config')),
     ]
 
+flags.DECLARE('cnt_vpn_clients', 'nova.network.manager')
 FLAGS = flags.FLAGS
 FLAGS.register_opts(cloudpipe_opts)
 
@@ -150,7 +152,7 @@ class CloudPipe(object):
                                                  key_name)
             private_key = result['private_key']
             key_dir = os.path.join(FLAGS.keys_path, context.user_id)
-            utils.ensure_tree(key_dir)
+            fileutils.ensure_tree(key_dir)
             key_path = os.path.join(key_dir, '%s.pem' % key_name)
             with open(key_path, 'w') as f:
                 f.write(private_key)

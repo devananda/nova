@@ -241,13 +241,9 @@ class CommonDeserializer(wsgi.MetadataXMLDeserializer):
 
     def _extract_scheduler_hints(self, server_node):
         """Marshal the scheduler hints attribute of a parsed request"""
-        node = self.find_first_child_named(server_node,
-                                           "OS-SCH-HNT:scheduler_hints")
-        # NOTE(vish): Support the os: prefix because it is what we use
-        #             for json, even though OS-SCH-HNT: is more correct
-        if not node:
-            node = self.find_first_child_named(server_node,
-                                               "os:scheduler_hints")
+        node = self.find_first_child_named_in_namespace(server_node,
+            "http://docs.openstack.org/compute/ext/scheduler-hints/api/v2",
+            "scheduler_hints")
         if node:
             scheduler_hints = {}
             for child in self.extract_elements(node):
@@ -436,6 +432,7 @@ class Controller(wsgi.Controller):
         super(Controller, self).__init__(**kwargs)
         self.compute_api = compute.API()
         self.ext_mgr = ext_mgr
+        self.quantum_attempted = False
 
     @wsgi.serializers(xml=MinimalServersTemplate)
     def index(self, req):
@@ -598,14 +595,19 @@ class Controller(wsgi.Controller):
 
     def _is_quantum_v2(self):
         # NOTE(dprince): quantumclient is not a requirement
+        if self.quantum_attempted:
+            return self.have_quantum
+
         try:
+            self.quantum_attempted = True
             from nova.network.quantumv2 import api as quantum_api
-            return issubclass(
+            self.have_quantum = issubclass(
                 importutils.import_class(FLAGS.network_api_class),
-                quantum_api.API
-            )
+                quantum_api.API)
         except ImportError:
-            return False
+            self.have_quantum = False
+
+        return self.have_quantum
 
     def _get_requested_networks(self, requested_networks):
         """Create a list of requested networks from the networks attribute."""
@@ -880,6 +882,8 @@ class Controller(wsgi.Controller):
             raise exc.HTTPBadRequest(explanation=unicode(error))
         except exception.InvalidMetadata as error:
             raise exc.HTTPBadRequest(explanation=unicode(error))
+        except exception.InvalidMetadataSize as error:
+            raise exc.HTTPRequestEntityTooLarge(explanation=unicode(error))
         except exception.ImageNotFound as error:
             msg = _("Can not find requested image")
             raise exc.HTTPBadRequest(explanation=msg)
@@ -1231,6 +1235,8 @@ class Controller(wsgi.Controller):
             raise exc.HTTPNotFound(explanation=msg)
         except exception.InvalidMetadata as error:
             raise exc.HTTPBadRequest(explanation=unicode(error))
+        except exception.InvalidMetadataSize as error:
+            raise exc.HTTPRequestEntityTooLarge(explanation=unicode(error))
         except exception.ImageNotFound:
             msg = _("Cannot find image for rebuild")
             raise exc.HTTPBadRequest(explanation=msg)

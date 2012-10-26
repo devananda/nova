@@ -91,9 +91,6 @@ core_opts = [
     cfg.StrOpt('state_path',
                default='$pybasedir',
                help="Top-level directory for maintaining nova's state"),
-    cfg.StrOpt('lock_path',
-               default='$pybasedir',
-               help='Directory to use for lock files'),
     ]
 
 debug_opts = [
@@ -321,11 +318,8 @@ global_opts = [
                default=None,
                help='The default format an ephemeral_volume will be '
                     'formatted with on creation.'),
-    cfg.StrOpt('root_helper',
-               default='sudo',
-               help='Deprecated: command to use for running commands as root'),
     cfg.StrOpt('rootwrap_config',
-               default=None,
+               default="/etc/nova/rootwrap.conf",
                help='Path to the rootwrap configuration file to use for '
                     'running commands as root'),
     cfg.StrOpt('network_driver',
