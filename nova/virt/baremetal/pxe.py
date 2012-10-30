@@ -403,11 +403,12 @@ class PXE(object):
                   ]
 
         fileutils.ensure_tree(tftp_root)
+        if not FLAGS.baremetal_pxe_vlan_per_host:
+            fileutils.ensure_tree(os.path.join(tftp_root, instance['uuid']))
         tftp_paths = []
         for image_id, tftp_path in images:
             if not FLAGS.baremetal_pxe_vlan_per_host:
                 tftp_path = os.path.join(instance['uuid'], tftp_path)
-                fileutils.ensure_tree(os.path.join(tftp_root, instance['uuid']))
             target = os.path.join(tftp_root, tftp_path)
             cache_image(image_id, target)
             tftp_paths.append(tftp_path)
