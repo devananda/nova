@@ -227,8 +227,12 @@ class SchedulerDependentManager(Manager):
         self.last_capabilities = capabilities
 
     @periodic_task
-    def _publish_service_capabilities(self, context):
-        """Pass data back to the scheduler at a periodic interval."""
+    def publish_service_capabilities(self, context):
+        """Pass data back to the scheduler.
+
+        Called at a periodic interval. And also called via rpc soon after
+        the start of the scheduler.
+        """
         if self.last_capabilities:
             LOG.debug(_('Notifying Schedulers of capabilities ...'))
             for capability_item in self.last_capabilities:

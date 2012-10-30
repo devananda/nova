@@ -88,15 +88,6 @@ service_opts = [
     cfg.IntOpt('metadata_workers',
                default=None,
                help='Number of workers for metadata service'),
-    cfg.StrOpt('osapi_volume_listen',
-               default="0.0.0.0",
-               help='IP address for OpenStack Volume API to listen'),
-    cfg.IntOpt('osapi_volume_listen_port',
-               default=8776,
-               help='port for os volume api to listen'),
-    cfg.IntOpt('osapi_volume_workers',
-               default=None,
-               help='Number of workers for OpenStack Volume API service'),
     ]
 
 FLAGS = flags.FLAGS
@@ -426,6 +417,9 @@ class Service(object):
         # Consume from all consumers in a thread
         self.conn.consume_in_thread()
 
+        if 'nova-scheduler' == self.binary:
+            self.manager.request_service_capabilities(ctxt)
+
         if self.report_interval:
             pulse = utils.LoopingCall(self.report_state)
             pulse.start(interval=self.report_interval,
@@ -479,7 +473,8 @@ class Service(object):
         if not topic:
             topic = binary.rpartition('nova-')[2]
         if not manager:
-            manager = FLAGS.get('%s_manager' % topic, None)
+            manager = FLAGS.get('%s_manager' %
+                                binary.rpartition('nova-')[2], None)
         if report_interval is None:
             report_interval = FLAGS.report_interval
         if periodic_interval is None:

@@ -324,7 +324,8 @@ def service_destroy(context, service_id):
         service_ref = service_get(context, service_id, session=session)
         service_ref.delete(session=session)
 
-        if service_ref.topic == 'compute' and service_ref.compute_node:
+        if (service_ref.topic == FLAGS.compute_topic and
+            service_ref.compute_node):
             for c in service_ref.compute_node:
                 c.delete(session=session)
 
@@ -380,7 +381,7 @@ def service_get_all_compute_by_host(context, host):
     result = model_query(context, models.Service, read_deleted="no").\
                 options(joinedload('compute_node')).\
                 filter_by(host=host).\
-                filter_by(topic="compute").\
+                filter_by(topic=FLAGS.compute_topic).\
                 all()
 
     if not result:
@@ -413,7 +414,7 @@ def service_get_all_compute_sorted(context):
         #             (SELECT host, SUM(instances.vcpus) AS instance_cores
         #              FROM instances GROUP BY host) AS inst_cores
         #             ON services.host = inst_cores.host
-        topic = 'compute'
+        topic = FLAGS.compute_topic
         label = 'instance_cores'
         subq = model_query(context, models.Instance.host,
                            func.sum(models.Instance.vcpus).label(label),
@@ -431,7 +432,7 @@ def service_get_all_compute_sorted(context):
 def service_get_all_volume_sorted(context):
     session = get_session()
     with session.begin():
-        topic = 'volume'
+        topic = FLAGS.volume_topic
         label = 'volume_gigabytes'
         subq = model_query(context, models.Volume.host,
                            func.sum(models.Volume.size).label(label),
@@ -1271,7 +1272,7 @@ def virtual_interface_create(context, values):
         vif_ref = models.VirtualInterface()
         vif_ref.update(values)
         vif_ref.save()
-    except IntegrityError:
+    except exception.DBError:
         raise exception.VirtualInterfaceCreateException()
 
     return vif_ref
@@ -1518,7 +1519,7 @@ def _build_instance_get(context, session=None):
             options(joinedload('instance_type'))
 
 
-@require_admin_context
+@require_context
 def instance_get_all(context, columns_to_join=None):
     if columns_to_join is None:
         columns_to_join = ['info_cache', 'security_groups',
@@ -1526,6 +1527,12 @@ def instance_get_all(context, columns_to_join=None):
     query = model_query(context, models.Instance)
     for column in columns_to_join:
         query = query.options(joinedload(column))
+    if not context.is_admin:
+        # If we're not admin context, add appropriate filter..
+        if context.project_id:
+            query = query.filter_by(project_id=context.project_id)
+        else:
+            query = query.filter_by(user_id=context.user_id)
     return query.all()
 
 

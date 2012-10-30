@@ -133,6 +133,10 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
         2.3 - Adds volume_id to reserve_block_device_name()
         2.4 - Add bdms to terminate_instance
         2.5 - Add block device and network info to reboot_instance
+        2.6 - Remove migration_id, add migration to resize_instance
+        2.7 - Remove migration_id, add migration to confirm_resize
+        2.8 - Remove migration_id, add migration to finish_resize
+        2.9 - Add publish_service_capabilities()
     '''
 
     #
@@ -204,14 +208,16 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
                            dest_check_data=dest_check_data),
                   topic=_compute_topic(self.topic, ctxt, None, instance))
 
-    def confirm_resize(self, ctxt, instance, migration_id, host,
+    def confirm_resize(self, ctxt, instance, migration, host,
             reservations=None, cast=True):
         rpc_method = self.cast if cast else self.call
         instance_p = jsonutils.to_primitive(instance)
+        migration_p = jsonutils.to_primitive(migration)
         return rpc_method(ctxt, self.make_msg('confirm_resize',
-                instance=instance_p, migration_id=migration_id,
+                instance=instance_p, migration=migration_p,
                 reservations=reservations),
-                topic=_compute_topic(self.topic, ctxt, host, instance))
+                topic=_compute_topic(self.topic, ctxt, host, instance),
+                version='2.7')
 
     def detach_volume(self, ctxt, instance, volume_id):
         instance_p = jsonutils.to_primitive(instance)
@@ -219,13 +225,15 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
                 instance=instance_p, volume_id=volume_id),
                 topic=_compute_topic(self.topic, ctxt, None, instance))
 
-    def finish_resize(self, ctxt, instance, migration_id, image, disk_info,
+    def finish_resize(self, ctxt, instance, migration, image, disk_info,
             host, reservations=None):
         instance_p = jsonutils.to_primitive(instance)
+        migration_p = jsonutils.to_primitive(migration)
         self.cast(ctxt, self.make_msg('finish_resize',
-                instance=instance_p, migration_id=migration_id,
+                instance=instance_p, migration=migration_p,
                 image=image, disk_info=disk_info, reservations=reservations),
-                topic=_compute_topic(self.topic, ctxt, host, None))
+                topic=_compute_topic(self.topic, ctxt, host, None),
+                version='2.8')
 
     def finish_revert_resize(self, ctxt, instance, migration_id, host,
                              reservations=None):
@@ -411,13 +419,15 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
                 instance=instance_p),
                 topic=_compute_topic(self.topic, ctxt, None, instance))
 
-    def resize_instance(self, ctxt, instance, migration_id, image,
+    def resize_instance(self, ctxt, instance, migration, image,
                         reservations=None):
         topic = _compute_topic(self.topic, ctxt, None, instance)
         instance_p = jsonutils.to_primitive(instance)
+        migration_p = jsonutils.to_primitive(migration)
         self.cast(ctxt, self.make_msg('resize_instance',
-                instance=instance_p, migration_id=migration_id,
-                image=image, reservations=reservations), topic)
+                instance=instance_p, migration=migration_p,
+                image=image, reservations=reservations), topic,
+                version='2.6')
 
     def resume_instance(self, ctxt, instance):
         instance_p = jsonutils.to_primitive(instance)
@@ -519,6 +529,9 @@ class ComputeAPI(nova.openstack.common.rpc.proxy.RpcProxy):
         self.cast(ctxt, self.make_msg('unrescue_instance',
                 instance=instance_p),
                 topic=_compute_topic(self.topic, ctxt, None, instance))
+
+    def publish_service_capabilities(self, ctxt):
+        self.fanout_cast(ctxt, self.make_msg('publish_service_capabilities'))
 
 
 class SecurityGroupAPI(nova.openstack.common.rpc.proxy.RpcProxy):

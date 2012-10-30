@@ -21,6 +21,7 @@ import tempfile
 
 from nova import context
 from nova import db
+from nova.db.sqlalchemy import models
 from nova import exception
 from nova.network import linux_net
 from nova.network import manager as network_manager
@@ -60,7 +61,9 @@ networks = [{'id': 0,
              'vlan': None,
              'host': HOST,
              'project_id': 'fake_project',
-             'vpn_public_address': '192.168.0.2'},
+             'vpn_public_address': '192.168.0.2',
+             'vpn_public_port': '22',
+             'vpn_private_address': '10.0.0.2'},
             {'id': 1,
              'uuid': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
              'label': 'test1',
@@ -80,7 +83,9 @@ networks = [{'id': 0,
              'vlan': None,
              'host': HOST,
              'project_id': 'fake_project',
-             'vpn_public_address': '192.168.1.2'}]
+             'vpn_public_address': '192.168.1.2',
+             'vpn_public_port': '22',
+             'vpn_private_address': '10.0.0.2'}]
 
 fixed_ips = [{'id': 0,
               'network_id': FAKEUUID,
@@ -1842,6 +1847,38 @@ class FloatingIPTestCase(test.TestCase):
 
         self.network.delete_dns_domain(context_admin, domain1)
         self.network.delete_dns_domain(context_admin, domain2)
+
+    def test_mac_conflicts(self):
+        """Make sure MAC collisions are retried"""
+        self.flags(create_unique_mac_address_attempts=3)
+        ctxt = context.RequestContext('testuser', 'testproject', is_admin=True)
+        macs = ['bb:bb:bb:bb:bb:bb', 'aa:aa:aa:aa:aa:aa']
+
+        # Create a VIF with aa:aa:aa:aa:aa:aa
+        crash_test_dummy_vif = {
+            'address': macs[1],
+            'instance_uuid': 'fake_uuid',
+            'network_id': 'fake_net',
+            'uuid': 'fake_uuid',
+            }
+        self.network.db.virtual_interface_create(ctxt, crash_test_dummy_vif)
+
+        # Hand out a collision first, then a legit MAC
+        def fake_gen_mac():
+            return macs.pop()
+        self.stubs.Set(utils, 'generate_mac_address', fake_gen_mac)
+
+        # SQLite doesn't seem to honor the uniqueness constraint on the
+        # address column, so fake the collision-avoidance here
+        def fake_vif_save(vif):
+            if vif.address == crash_test_dummy_vif['address']:
+                raise exception.DBError("If you're smart, you'll retry!")
+        self.stubs.Set(models.VirtualInterface, 'save', fake_vif_save)
+
+        # Attempt to add another and make sure that both MACs are consumed
+        # by the retry loop
+        self.network.add_virtual_interface(ctxt, 'fake_uuid', 'fake_net')
+        self.assertEqual(macs, [])
 
 
 class NetworkPolicyTestCase(test.TestCase):

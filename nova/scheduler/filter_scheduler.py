@@ -59,7 +59,6 @@ class FilterScheduler(driver.Scheduler):
 
         Returns a list of the instances created.
         """
-        elevated = context.elevated()
         instance_uuids = request_spec.get('instance_uuids')
         num_instances = len(instance_uuids)
         LOG.debug(_("Attempting to build %(num_instances)d instance(s)") %
@@ -69,8 +68,9 @@ class FilterScheduler(driver.Scheduler):
         notifier.notify(context, notifier.publisher_id("scheduler"),
                         'scheduler.run_instance.start', notifier.INFO, payload)
 
-        weighted_hosts = self._schedule(context, "compute", request_spec,
-                                        filter_properties, instance_uuids)
+        weighted_hosts = self._schedule(context, FLAGS.compute_topic,
+                                        request_spec, filter_properties,
+                                        instance_uuids)
 
         # NOTE(comstud): Make sure we do not pass this through.  It
         # contains an instance of RpcContext that cannot be serialized.
@@ -85,7 +85,7 @@ class FilterScheduler(driver.Scheduler):
                 except IndexError:
                     raise exception.NoValidHost(reason="")
 
-                self._provision_resource(elevated, weighted_host,
+                self._provision_resource(context, weighted_host,
                                          request_spec,
                                          filter_properties,
                                          requested_networks,
@@ -115,7 +115,7 @@ class FilterScheduler(driver.Scheduler):
         the prep_resize operation to it.
         """
 
-        hosts = self._schedule(context, 'compute', request_spec,
+        hosts = self._schedule(context, FLAGS.compute_topic, request_spec,
                                filter_properties, [instance['uuid']])
         if not hosts:
             raise exception.NoValidHost(reason="")
@@ -222,7 +222,7 @@ class FilterScheduler(driver.Scheduler):
         ordered by their fitness.
         """
         elevated = context.elevated()
-        if topic != "compute":
+        if topic != FLAGS.compute_topic:
             msg = _("Scheduler only understands Compute nodes (for now)")
             raise NotImplementedError(msg)
 
@@ -302,7 +302,7 @@ class FilterScheduler(driver.Scheduler):
         """
         if topic is None:
             # Schedulers only support compute right now.
-            topic = "compute"
+            topic = FLAGS.compute_topic
         if topic in self.cost_function_cache:
             return self.cost_function_cache[topic]
 

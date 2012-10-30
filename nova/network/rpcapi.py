@@ -257,21 +257,20 @@ class NetworkAPI(rpc_proxy.RpcProxy):
                 topic=rpc.queue_get_for(ctxt, self.topic, host))
 
     def lease_fixed_ip(self, ctxt, address, host):
-        return self.cast(ctxt, self.make_msg('lease_fixed_ip',
-                address=address),
-                topic=rpc.queue_get_for(ctxt, self.topic, host))
+        self.cast(ctxt, self.make_msg('lease_fixed_ip', address=address),
+                  topic=rpc.queue_get_for(ctxt, self.topic, host))
 
     def release_fixed_ip(self, ctxt, address, host):
-        return self.cast(ctxt, self.make_msg('release_fixed_ip',
-                address=address),
-                topic=rpc.queue_get_for(ctxt, self.topic, host))
+        self.cast(ctxt, self.make_msg('release_fixed_ip', address=address),
+                  topic=rpc.queue_get_for(ctxt, self.topic, host))
 
     def migrate_instance_start(self, ctxt, instance_uuid,
                                floating_addresses, host):
         return self.call(ctxt, self.make_msg('migrate_instance_start',
                                              instance_uuid=instance_uuid,
                                     floating_addresses=floating_addresses),
-                         topic=rpc.queue_get_for(ctxt, self.topic, host))
+                         topic=rpc.queue_get_for(ctxt, self.topic, host),
+                         version='1.1')
 
     def migrate_instance_finish(self, ctxt, instance_uuid,
                                 floating_addresses, dest):
@@ -279,4 +278,5 @@ class NetworkAPI(rpc_proxy.RpcProxy):
                                              instance_uuid=instance_uuid,
                                     floating_addresses=floating_addresses,
                                              host=dest),
-                         topic=rpc.queue_get_for(ctxt, self.topic, dest))
+                         topic=rpc.queue_get_for(ctxt, self.topic, dest),
+                         version='1.1')
