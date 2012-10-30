@@ -61,6 +61,7 @@ from nova.tests import fake_network
 from nova.tests import fake_network_cache_model
 from nova.tests.image import fake as fake_image
 from nova import utils
+from nova.virt import driver as virt_driver
 from nova.volume import cinder
 
 
