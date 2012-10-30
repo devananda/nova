@@ -142,7 +142,7 @@ def _build_pxe_config(deployment_id, deployment_key, deployment_iscsi_iqn,
     pxeconf += "append"
     pxeconf += " initrd=%s" % deployment_ari_path
     pxeconf += " selinux=0"
-    pxeconf += " disk=cciss/c0d0,sda,hda"
+    pxeconf += " disk=cciss/c0d0,sda,hda,vda"
     pxeconf += " iscsi_target_iqn=%s" % deployment_iscsi_iqn
     pxeconf += " deployment_id=%s" % deployment_id
     pxeconf += " deployment_key=%s" % deployment_key
@@ -420,8 +420,11 @@ class PXE(object):
         inst_type_id = instance['instance_type_id']
         inst_type = instance_types.get_instance_type(inst_type_id)
         swap_mb = inst_type['swap']
-        if swap_mb < 1024:
-            swap_mb = 1024
+        # Always create a swap partition for simpler code paths in the
+        # deployment side. Its up to the user to choose how big - use 1MB if
+        # they don't choose anything at all.
+        if swap_mb < 1:
+            swap_mb = 1
 
         deployment_key = _random_alnum(32)
         deployment_id = bmdb.bm_deployment_create(context, deployment_key,
