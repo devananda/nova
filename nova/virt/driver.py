@@ -200,6 +200,12 @@ class ComputeDriver(object):
                block_device_info=None):
         """Reboot the specified instance.
 
+        After this is called successfully, the instance's state
+        goes back to power_state.RUNNING. The virtualization
+        platform should ensure that the reboot action has completed
+        successfully even in cases in which the underlying domain/vm
+        is paused or halted/stopped.
+
         :param instance: Instance object as returned by DB layer.
         :param network_info:
            :py:meth:`~nova.network.manager.NetworkManager.get_instance_nw_info`
@@ -398,6 +404,7 @@ class ComputeDriver(object):
         raise NotImplementedError()
 
     def check_can_live_migrate_destination(self, ctxt, instance_ref,
+                                           src_compute_info, dst_compute_info,
                                            block_migration=False,
                                            disk_over_commit=False):
         """Check if it is possible to execute live migration.
@@ -407,7 +414,8 @@ class ComputeDriver(object):
 
         :param ctxt: security context
         :param instance_ref: nova.db.sqlalchemy.models.Instance
-        :param dest: destination host
+        :param src_compute_info: Info about the sending machine
+        :param dst_compute_info: Info about the receiving machine
         :param block_migration: if true, prepare for block migration
         :param disk_over_commit: if true, allow disk over commit
         """

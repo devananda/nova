@@ -85,11 +85,6 @@ compute_opts = [
                help="Where cached images are stored under $instances_path."
                     "This is NOT the full path - just a folder name."
                     "For per-compute-host cached images, set to _base_$my_ip"),
-    cfg.StrOpt('compute_driver',
-               help='Driver to use for controlling virtualization. Options '
-                   'include: libvirt.LibvirtDriver, xenapi.XenAPIDriver, '
-                   'fake.FakeDriver, baremetal.BareMetalDriver, '
-                   'vmwareapi.VMWareESXDriver'),
     cfg.StrOpt('console_host',
                default=socket.getfqdn(),
                help='Console proxy host to use to connect '
@@ -1514,14 +1509,9 @@ class ComputeManager(manager.SchedulerDependentManager):
 
             self.driver.destroy(instance, self._legacy_nw_info(network_info),
                                 block_device_info)
-            # Terminate volume connections.
-            bdms = self._get_instance_volume_bdms(context, instance['uuid'])
-            if bdms:
-                connector = self.driver.get_volume_connector(instance)
-                for bdm in bdms:
-                    volume = self.volume_api.get(context, bdm['volume_id'])
-                    self.volume_api.terminate_connection(context, volume,
-                            connector)
+
+            self._terminate_volume_connections(context, instance)
+
             self.compute_rpcapi.finish_revert_resize(context, instance,
                     migration_ref['id'], migration_ref['source_compute'],
                     reservations)
@@ -1693,14 +1683,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                     instance_type_ref, self._legacy_nw_info(network_info),
                     block_device_info)
 
-            # Terminate volume connections.
-            bdms = self._get_instance_volume_bdms(context, instance['uuid'])
-            if bdms:
-                connector = self.driver.get_volume_connector(instance)
-                for bdm in bdms:
-                    volume = self.volume_api.get(context, bdm['volume_id'])
-                    self.volume_api.terminate_connection(context, volume,
-                            connector)
+            self._terminate_volume_connections(context, instance)
 
             if migration['dest_compute'] != migration['source_compute']:
                 self.network_api.migrate_instance_start(context, instance,
@@ -1722,6 +1705,15 @@ class ComputeManager(manager.SchedulerDependentManager):
 
             self._notify_about_instance_usage(context, instance, "resize.end",
                                               network_info=network_info)
+
+    def _terminate_volume_connections(self, context, instance):
+        bdms = self._get_instance_volume_bdms(context, instance['uuid'])
+        if bdms:
+            connector = self.driver.get_volume_connector(instance)
+            for bdm in bdms:
+                volume = self.volume_api.get(context, bdm['volume_id'])
+                self.volume_api.terminate_connection(context, volume,
+                        connector)
 
     def _finish_resize(self, context, instance, migration, disk_info,
                        image):
@@ -2200,6 +2192,14 @@ class ComputeManager(manager.SchedulerDependentManager):
         except exception.NotFound:
             pass
 
+    def _get_compute_info(self, context, host):
+        compute_node_ref = self.db.service_get_all_compute_by_host(context,
+                                                                   host)
+        try:
+            return compute_node_ref[0]['compute_node'][0]
+        except IndexError:
+            raise exception.NotFound(_("Host %(host)s not found") % locals())
+
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     def check_can_live_migrate_destination(self, ctxt, instance,
                                            block_migration=False,
@@ -2217,8 +2217,11 @@ class ComputeManager(manager.SchedulerDependentManager):
         Returns a mapping of values required in case of block migration
         and None otherwise.
         """
+        src_compute_info = self._get_compute_info(ctxt, instance['host'])
+        dst_compute_info = self._get_compute_info(ctxt, FLAGS.host)
         dest_check_data = self.driver.check_can_live_migrate_destination(ctxt,
-            instance, block_migration, disk_over_commit)
+            instance, src_compute_info, dst_compute_info,
+            block_migration, disk_over_commit)
         try:
             self.compute_rpcapi.check_can_live_migrate_source(ctxt,
                     instance, dest_check_data)
