@@ -87,9 +87,10 @@ def _console_pid(node_id):
 def _stop_console(node_id):
     console_pid = _console_pid(node_id)
     if console_pid:
-        utils.execute('kill', str(console_pid),
+        # Allow exitcode 99 (RC_UNAUTHORIZED)
+        utils.execute('kill', '-TERM', str(console_pid),
                       run_as_root=True,
-                      check_exit_code=False)
+                      check_exit_code=[0, 99])
     bm_utils.unlink_without_raise(_console_pidfile(node_id))
 
 
