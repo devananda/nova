@@ -2,7 +2,7 @@
 Packages
 ========
 
-* This procedure is for RHEL. Reading 'tilera-bm-instance-creation.txt' may make this document easy to understand.
+* This procedure is for RHEL. Reading 'tilera-bm-instance-creation.rst' may make this document easy to understand.
 
 * TFTP, NFS, EXPECT, and Telnet installation::
 

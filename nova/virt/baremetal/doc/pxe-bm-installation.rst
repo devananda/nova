@@ -2,7 +2,7 @@
 Packages
 ========
 
-* This procedure is for Ubuntu 12.04 x86_64. Reading 'pxe-bm-instance-creation.txt' may make this document easy to understand.
+* This procedure is for Ubuntu 12.04 x86_64. Reading 'pxe-bm-instance-creation.rst' may make this document easy to understand.
 
 * dnsmasq (PXE server for baremetal hosts)
 * syslinux (bootloader for PXE)
@@ -31,7 +31,7 @@ You can specify a 'generic' kernel installed to the working host.
 
 Example::
 
-	$ ./baremetal-mkinitrd.sh /tmp/deploy-ramdisk.img 3.2.0-26-generic
+	$ ./baremetal-mkinitrd.sh /tmp/deploy-ramdisk.img 3.2.0-32-generic
 	working in /tmp/baremetal-mkinitrd.9AciX98N
 	368017 blocks
 
@@ -40,15 +40,51 @@ Register the kernel and the ramdisk to Glance.
 
 Example::
 
-	$ glance add name="baremetal deployment ramdisk" is_public=true container_format=ari disk_format=ari < /tmp/deploy-ramdisk.img
-	Uploading image 'baremetal deployment ramdisk'
-	===========================================[100%] 114.951697M/s, ETA  0h  0m  0s
-	Added new image with ID: e99775cb-f78d-401e-9d14-acd86e2f36e3
+	$ glance image-create --name="baremetal deployment ramdisk" --public --container-format=ari --disk-format=ari < /tmp/deploy-ramdisk.img
+	+------------------+--------------------------------------+
+	| Property         | Value                                |
+	+------------------+--------------------------------------+
+	| checksum         | cbe12af4f684529ce4f16c82347b6b78     |
+	| container_format | ari                                  |
+	| created_at       | 2012-11-01T03:27:29                  |
+	| deleted          | False                                |
+	| deleted_at       | None                                 |
+	| disk_format      | ari                                  |
+	| id               | 97b93eaa-1841-4b1a-829b-3b2919c6aa77 |
+	| is_public        | True                                 |
+	| min_disk         | 0                                    |
+	| min_ram          | 0                                    |
+	| name             | baremetal deployment ramdisk         |
+	| owner            | e6b9a92039d6440a9c22a3e6659d750d     |
+	| protected        | False                                |
+	| size             | 67323792                             |
+	| status           | active                               |
+	| updated_at       | 2012-11-01T03:27:30                  |
+	+------------------+--------------------------------------+
 
-	$ glance add name="baremetal deployment kernel" is_public=true container_format=aki disk_format=aki < /boot/vmlinuz-3.2.0-26-generic
-	Uploading image 'baremetal deployment kernel'
-	===========================================[100%] 46.9M/s, ETA  0h  0m  0s
-	Added new image with ID: d76012fc-4055-485c-a978-f748679b89a9
+	(You may have to make the kernel readable)
+	$ sudo chmod a+r /boot/vmlinuz-3.2.0-32-generic
+	$ glance image-create --name="baremetal deployment kernel" --public --container-format=aki --disk-format=aki < /boot/vmlinuz-3.2.0-32-generic
+	+------------------+--------------------------------------+
+	| Property         | Value                                |
+	+------------------+--------------------------------------+
+	| checksum         | 32168a6c0222dc3543816667abac4d42     |
+	| container_format | aki                                  |
+	| created_at       | 2012-11-01T03:29:12                  |
+	| deleted          | False                                |
+	| deleted_at       | None                                 |
+	| disk_format      | aki                                  |
+	| id               | cabedc5b-4efa-413f-82e2-bfca7c1f1097 |
+	| is_public        | True                                 |
+	| min_disk         | 0                                    |
+	| min_ram          | 0                                    |
+	| name             | baremetal deployment kernel          |
+	| owner            | e6b9a92039d6440a9c22a3e6659d750d     |
+	| protected        | False                                |
+	| size             | 4966768                              |
+	| status           | active                               |
+	| updated_at       | 2012-11-01T03:29:13                  |
+	+------------------+--------------------------------------+
 
 
 ShellInABox
@@ -241,6 +277,6 @@ Example: create a partition image from ubuntu cloud images' Precise tarball::
 	$ sudo tar -C /mnt -xzf ~/precise-server-cloudimg-amd64-root.tar.gz
 	$ sudo mv /mnt/etc/resolv.conf /mnt/etc/resolv.conf_orig
 	$ sudo cp /etc/resolv.conf /mnt/etc/resolv.conf
-	$ sudo chroot /mnt apt-get install linux-image-3.2.0-26-generic vlan open-iscsi
+	$ sudo chroot /mnt apt-get install linux-image-3.2.0-32-generic vlan open-iscsi
 	$ sudo mv /mnt/etc/resolv.conf_orig /mnt/etc/resolv.conf
 	$ sudo umount /mnt
