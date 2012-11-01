@@ -862,7 +862,8 @@ def destroy_kernel_ramdisk(session, kernel, ramdisk):
         args['kernel-file'] = kernel
     if ramdisk:
         args['ramdisk-file'] = ramdisk
-    session.call_plugin('kernel', 'remove_kernel_ramdisk', args)
+    if args:
+        session.call_plugin('kernel', 'remove_kernel_ramdisk', args)
 
 
 def _create_cached_image(context, session, instance, name_label,
@@ -2221,3 +2222,10 @@ def move_disks(session, instance, disk_info):
     root_vdi_ref = session.call_xenapi('VDI.get_by_uuid', root_uuid)
 
     return {'uuid': root_uuid, 'ref': root_vdi_ref}
+
+
+def vm_ref_or_raise(session, instance_name):
+    vm_ref = lookup(session, instance_name)
+    if vm_ref is None:
+        raise exception.InstanceNotFound(instance_id=instance_name)
+    return vm_ref
