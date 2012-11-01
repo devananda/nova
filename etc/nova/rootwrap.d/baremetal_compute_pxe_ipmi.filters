@@ -1,0 +1,29 @@
+# nova-rootwrap command filters for compute nodes
+# This file should be owned by (and only-writeable by) the root user
+
+[Filters]
+# nova/virt/baremetal/ipmi.py: 'ipmitool', ..
+ipmitool: CommandFilter, /usr/bin/ipmitool, root
+
+# nova/virt/baremetal/ipmi.py: 'kill', '-TERM', str(console_pid)
+kill_shellinaboxd: KillFilter, root, /usr/local/bin/shellinaboxd, -15, -TERM
+
+# nova/virt/baremetal/pxe.py: 'ip', 'address', 'add', ..
+# nova/virt/baremetal/pxe.py: 'ip', 'route', 'add', ..
+# nova/virt/baremetal/vlan.py: 'ip', 'link', 'show', 'dev', device,
+# nova/virt/baremetal/vlan.py: 'ip', 'link', 'set', parent_interface, 'up'
+# nova/virt/baremetal/vlan.py: 'ip', 'link', 'set', vlan_interface, 'address,..
+# nova/virt/baremetal/vlan.py: 'ip', 'link', 'set', vlan_interface, 'up'
+# nova/virt/baremetal/vlan.py: 'ip', 'link', 'set', vlan_interface, 'down'
+ip: CommandFilter, /sbin/ip, root
+
+# nova/virt/baremetal/pxe.py: 'dnsmasq', ...
+dnsmasq: CommandFilter, /usr/sbin/dnsmasq, root
+
+# nova/virt/baremetal/pxe.py: 'kill', '-TERM', str(dnsmasq_pid)
+kill_dnsmasq: KillFilter, root, /usr/sbin/dnsmasq, -15, -TERM
+
+# nova/virt/baremetal/vlan.py: 'vconfig', 'set_name_type', ..
+# nova/virt/baremetal/vlan.py: 'vconfig', 'add', parent_interface, vlan_num
+# nova/virt/baremetal/vlan.py: 'vconfig', 'rem', vlan_interface
+vconfig: CommandFilter, /sbin/vconfig, root
