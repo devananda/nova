@@ -96,7 +96,7 @@ class BareMetalIPMITestCase(test.TestCase):
         self.mox.StubOutWithMock(self.ipmi, '_is_power')
         self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
         self.mox.StubOutWithMock(time, 'sleep')
-        for _ in range(retry):
+        for _ in xrange(retry):
             self.ipmi._is_power("on").AndReturn(False)
             self.ipmi._exec_ipmitool("power on")
             time.sleep(wait)
@@ -114,7 +114,7 @@ class BareMetalIPMITestCase(test.TestCase):
         self.mox.StubOutWithMock(self.ipmi, '_is_power')
         self.mox.StubOutWithMock(self.ipmi, '_exec_ipmitool')
         self.mox.StubOutWithMock(time, 'sleep')
-        for _ in range(retry):
+        for _ in xrange(retry):
             self.ipmi._is_power("off").AndReturn(False)
             self.ipmi._exec_ipmitool("power off")
             time.sleep(wait)

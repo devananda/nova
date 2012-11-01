@@ -195,8 +195,8 @@ class Ipmi(object):
 
         ipmi_args = "/:%(uid)s:%(gid)s:HOME:ipmitool -H %(address)s" \
                     " -I lanplus -U %(user)s -f %(pwfile)s sol activate" \
-                    % {'uid': str(os.getuid()),
-                       'gid': str(os.getgid()),
+                    % {'uid': os.getuid(),
+                       'gid': os.getgid(),
                        'address': self._address,
                        'user': self._user,
                        'pwfile': pwfile,
