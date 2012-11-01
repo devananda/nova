@@ -41,7 +41,7 @@ opts = [
                default=None,
                help='path to baremetal terminal SSL cert(PEM)'),
     cfg.StrOpt('baremetal_term_pid_dir',
-               default='/var/lib/nova/baremetal/console',
+               default='$state_path/baremetal/console',
                help='path to directory stores pidfiles of baremetal_term'),
     cfg.IntOpt('baremetal_ipmi_power_retry',
                default=3,
