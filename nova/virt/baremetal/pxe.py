@@ -382,15 +382,17 @@ class PXE(base.NodeDriver):
         name = "01-" + node['prov_mac_address'].replace(":", "-").lower()
         return name
 
-    def _get_deploy_aki_id(self, image_meta):
-        props = image_meta.get('properties', {})
+    def _get_deploy_aki_id(self, instance):
+        props = instance.get('extra_specs', {})
         return props.get('deploy_kernel_id', CONF.baremetal_deploy_kernel)
 
-    def _get_deploy_ari_id(self, image_meta):
-        props = image_meta.get('properties', {})
+    def _get_deploy_ari_id(self, instance):
+        props = instance.get('extra_specs', {})
         return props.get('deploy_ramdisk_id', CONF.baremetal_deploy_ramdisk)
 
     def _put_tftp_images(self, context, instance, image_meta, tftp_root):
+        # NOTE: exceptions from here are squelched and not visible.
+        #       so we use LOG.error instead
         def _cache_image(image_id, target):
             LOG.debug("fetching id=%s target=%s", image_id, target)
             bm_utils.cache_image(context=context,
@@ -403,16 +405,20 @@ class PXE(base.NodeDriver):
             aki_id = str(instance['kernel_id'])
             ari_id = str(instance['ramdisk_id'])
         except KeyError as e:
-            raise exception.NovaException(_('Can not activate baremetal '
-                        'bootloader, %s is not defined') % e)
-        deploy_aki_id = self._get_deploy_aki_id(image_meta)
+            LOG.error(_('Can not activate bootloader, %s undefined') % e)
+            raise exception.NovaException()
+
+        deploy_aki_id = self._get_deploy_aki_id(instance)
         if not deploy_aki_id:
-            raise exception.NovaException(_('Can not activate baremetal '
-                        'bootloader, %s is not defined') % 'deploy_kernel_id')
-        deploy_ari_id = self._get_deploy_ari_id(image_meta)
+            LOG.error(_('Can not activate bootloader, '
+                            'deploy_kernel_id undefined'))
+            raise exception.NovaException()
+
+        deploy_ari_id = self._get_deploy_ari_id(instance)
         if not deploy_ari_id:
-            raise exception.NovaException(_('Can not activate baremetal '
-                        'bootloader, %s is not defined') % 'deploy_ramdisk_id')
+            LOG.error(_('Can not activate bootloader, '
+                            'deploy_ramdisk_id undefined'))
+            raise exception.NovaException()
 
         images = [(deploy_aki_id, 'deploy_kernel'),
                   (deploy_ari_id, 'deploy_ramdisk'),

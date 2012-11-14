@@ -38,8 +38,8 @@ class BaremetalPXETestCase(test.TestCase):
 
     def test_get_deploy_aki_id(self):
         p = pxe.PXE()
-        with_kernel = {"properties": {"deploy_kernel_id": "123"}}
-        without_kernel = {"properties": {}}
+        with_kernel = {"extra_specs": {"deploy_kernel_id": "123"}}
+        without_kernel = {"extra_specs": {}}
 
         self.flags(baremetal_deploy_kernel="x")
         kernel = p._get_deploy_aki_id(with_kernel)
@@ -56,8 +56,8 @@ class BaremetalPXETestCase(test.TestCase):
     def test_get_deploy_ari_id(self):
         p = pxe.PXE()
 
-        with_ramdisk = {"properties": {"deploy_ramdisk_id": "123"}}
-        without_ramdisk = {"properties": {}}
+        with_ramdisk = {"extra_specs": {"deploy_ramdisk_id": "123"}}
+        without_ramdisk = {"extra_specs": {}}
 
         self.flags(baremetal_deploy_ramdisk="x")
         ramdisk = p._get_deploy_ari_id(with_ramdisk)
