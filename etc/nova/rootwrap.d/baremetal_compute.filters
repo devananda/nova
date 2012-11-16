@@ -1,0 +1,9 @@
+# nova-rootwrap command filters for bare-metal compute nodes
+# This file should be owned by (and only-writeable by) the root user
+
+[Filters]
+# nova/virt/baremetal/volume_driver.py: 'tgtadm', '--lld', 'iscsi', ...
+tgtadm: CommandFilter, /usr/sbin/tgtadm, root
+
+# nova/nova/utils.py: 'cat', file_path, run_as_root=True
+cat: CommandFilter, /bin/cat, root
