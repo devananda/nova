@@ -161,11 +161,13 @@ class Ipmi(base.PowerManager):
 
     def activate_node(self):
         self._power("off")
+        self._set_pxe_for_next_boot()
         state = self._power("on")
         return state
 
     def reboot_node(self):
         self._power("off")
+        self._set_pxe_for_next_boot()
         state = self._power("on")
         return state
 
@@ -213,3 +215,9 @@ class Ipmi(base.PowerManager):
 
     def stop_console(self):
         _stop_console(self._node_id)
+
+    def _set_pxe_for_next_boot(self):
+        try:
+            self._exec_ipmitool("chassis bootdev pxe")
+        except Exception:
+            LOG.exception(_("Caught ipmitool exception"))
